@@ -44,7 +44,7 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/ph33nx/hono-honeypot"
+		"url": "git+https://github.com/ph33nx/hono-honeypot.git"
 	},
 	"bugs": {
 		"url": "https://github.com/ph33nx/hono-honeypot/issues"
