@@ -1,0 +1,66 @@
+{
+	"name": "hono-honeypot",
+	"version": "1.0.0",
+	"description": "Zero-dependency honeypot middleware for Hono.js that blocks bot attacks and vulnerability scanners",
+	"type": "module",
+	"main": "./dist/index.cjs",
+	"module": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"import": {
+				"types": "./dist/index.d.ts",
+				"default": "./dist/index.js"
+			},
+			"require": {
+				"types": "./dist/index.d.cts",
+				"default": "./dist/index.cjs"
+			}
+		}
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
+	"scripts": {
+		"build": "tsup",
+		"test": "vitest run",
+		"prepublishOnly": "bun run build && bun test"
+	},
+	"keywords": [
+		"hono",
+		"middleware",
+		"honeypot",
+		"security",
+		"bot-protection",
+		"firewall",
+		"cloudflare-workers",
+		"bun",
+		"deno",
+		"edge"
+	],
+	"author": "ph33nx (https://github.com/ph33nx)",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/ph33nx/hono-honeypot"
+	},
+	"bugs": {
+		"url": "https://github.com/ph33nx/hono-honeypot/issues"
+	},
+	"homepage": "https://github.com/ph33nx/hono-honeypot#readme",
+	"peerDependencies": {
+		"hono": "^4.0.0"
+	},
+	"devDependencies": {
+		"@types/bun": "^1.3.5",
+		"hono": "^4.11.3",
+		"tsup": "^8.5.1",
+		"typescript": "^5.9.3",
+		"vitest": "^4.0.16"
+	},
+	"engines": {
+		"node": ">=18"
+	}
+}
