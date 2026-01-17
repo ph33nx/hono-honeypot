@@ -17,78 +17,104 @@ import { createMiddleware } from 'hono/factory';
  * - pattern = substring match (use carefully)
  */
 const ATTACK_PATTERNS = [
-	// PHP
-	/\.php$/i,
-	/\/config\.php/i,
-	/\/phpinfo/i,
-	/\/eval-stdin\.php/i,
-	/\/xmlrpc\.php/i,
+  // PHP patterns
+  /\.php$/i,
+  /\/config\.php/i,
+  /\/phpinfo/i,
+  /\/eval-stdin\.php/i,
+  /\/xmlrpc\.php/i,
 
-	// WordPress
-	/^\/wp$/i,
-	/^\/wp-/i,
-	/^\/wordpress/i,
+  // WordPress (anchored to root level to avoid catching /api/wordpress-integration)
+  /^\/wp$/i,
+  /^\/wp-/i,
+  /^\/wordpress/i,
 
-	// Admin panels
-	/^\/admin(\.php)?$/i,
-	/^\/administrator/i,
-	/^\/phpmyadmin/i,
-	/^\/cpanel/i,
-	/^\/whm/i,
-	/^\/cgi-bin/i,
+  // Admin panels (exact matches)
+  /^\/admin(\.php)?$/i,
+  /^\/administrator/i,
+  /^\/phpmyadmin/i,
+  /^\/cpanel/i,
+  /^\/whm/i,
+  /^\/cgi-bin/i,
 
-	// CMS frameworks
-	/^\/typo3/i,
-	/^\/joomla/i,
-	/^\/drupal/i,
-	/^\/magento/i,
+  // CMS frameworks (anchored to root)
+  /^\/typo3/i,
+  /^\/joomla/i,
+  /^\/drupal/i,
+  /^\/magento/i,
 
-	// Sensitive files
-	/\/\.env/i,
-	/\/\.git/i,
-	/\/\.sql$/i,
-	/\/\.well-known\/security\.txt/i,
-	/\/(vendor|node_modules)\//i,
+  // Config/sensitive files (anywhere in path is suspicious)
+  /\/\.env/i,
+  /\/\.git/i,
+  /\/\.sql$/i,
+  /\/\.well-known\/security\.txt/i,
+  /\/(vendor|node_modules)\//i,
 
-	// Backup patterns
-	/^\/backup/i,
-	/^\/bk$/i,
-	/^\/bak$/i,
-	/^\/bac$/i,
-	/^\/dump/i,
+  // Backup files (.bak, .old, .backup, .orig)
+  /\.(bak|old|backup|orig|save|swp)$/i,
 
-	// Database
-	/^\/db_/i,
-	/^\/sql/i,
+  // Config files at root (NOT /api/*/config.json, only root-level)
+  /^\/config\.(js|json|yml|yaml|xml|ini|conf)$/i,
+  /^\/settings\.(js|json|yml|yaml|xml)$/i,
+  /^\/credentials\.(js|json|yml|yaml)$/i,
+  /^\/secrets\.(js|json|yml|yaml|env)$/i,
+  /^\/appsettings\.(json|yml|yaml)$/i,
+  /^\/application\.(yml|yaml|xml|properties)$/i,
 
-	// Shell/exploits
-	/^\/shell/i,
+  // JS files at public root
+  /^\/env\.js$/i,
 
-	// Auth routes
-	/^\/login$/i,
-	/^\/signin$/i,
-	/^\/register$/i,
-	/^\/signup$/i,
-	/^\/dashboard$/i,
-	/^\/user\/(login|signin|register|signup)/i,
+  // Server info/status routes
+  /^\/server-(status|info)$/i,
+  /^\/info$/i,
 
-	// Discovery patterns
-	/^\/old$/i,
-	/^\/new$/i,
-	/^\/test$/i,
-	/^\/demo$/i,
-	/^\/www$/i,
-	/^\/main$/i,
-	/^\/site$/i,
-	/^\/shop$/i,
-	/^\/blog$/i,
-	/^\/bc$/i,
-	/^\/sitio$/i,
-	/^\/sito$/i,
-	/^\/oldsite$/i,
-	/^\/old-site$/i,
-	/^\/\d{4}$/i, // Year folders: /2017, /2018, etc.
-];
+  // Swagger/OpenAPI at root (NOT /api/openapi.json)
+  /^\/swagger\.(json|yml|yaml)$/i,
+  /^\/api\/swagger\.(json|yml|yaml)$/i,
+
+  // Environment leak attempts
+  /^\/_env/i,
+  /^\/config\//i, // /config/secrets.env, /config/database.php.bak
+
+  // Backup patterns (anchored to root to avoid /api/backup-service)
+  /^\/backup/i,
+  /^\/bk$/i,
+  /^\/bak$/i,
+  /^\/bac$/i,
+  /^\/dump/i,
+
+  // Database patterns (anchored to root)
+  /^\/db_/i,
+  /^\/sql/i,
+
+  // Shell/exploit patterns (anchored to root)
+  /^\/shell/i,
+
+  // Auth routes (exact matches only)
+  /^\/login$/i,
+  /^\/signin$/i,
+  /^\/register$/i,
+  /^\/signup$/i,
+  /^\/dashboard$/i,
+  /^\/user\/(login|signin|register|signup)/i,
+
+  // Brute force discovery patterns (exact matches - year folders like /2017, common test paths)
+  /^\/old$/i,
+  /^\/new$/i,
+  /^\/test$/i,
+  /^\/demo$/i,
+  /^\/www$/i,
+  /^\/main$/i,
+  /^\/site$/i,
+  /^\/shop$/i,
+  /^\/blog$/i, // Exact /blog only (not /blogs)
+  /^\/bc$/i,
+  /^\/sitio$/i,
+  /^\/sito$/i,
+  /^\/oldsite$/i,
+  /^\/old-site$/i,
+  /^\/\d{4}$/i, // 4-digit years: /2017, /2018, etc.
+]
 
 /**
  * Configuration options for honeypot middleware

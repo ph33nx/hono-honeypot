@@ -116,4 +116,64 @@ describe('honeypot middleware', () => {
 		const phpmyadminRes = await app.request('/phpmyadmin');
 		expect(phpmyadminRes.status).toBe(410);
 	});
+
+	it('blocks config file attempts at root', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false }));
+		app.get('*', (c) => c.text('OK'));
+
+		// Should block root-level config files
+		expect((await app.request('/config.json')).status).toBe(410);
+		expect((await app.request('/settings.yml')).status).toBe(410);
+		expect((await app.request('/secrets.env')).status).toBe(410);
+		expect((await app.request('/appsettings.json')).status).toBe(410);
+
+		// But allow config in API routes
+		const apiConfig = await app.request('/api/config.json');
+		expect(apiConfig.status).toBe(200);
+	});
+
+	it('blocks backup file extensions', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false }));
+		app.get('*', (c) => c.text('OK'));
+
+		// Should block backup file extensions anywhere
+		expect((await app.request('/index.php.bak')).status).toBe(410);
+		expect((await app.request('/database.sql.old')).status).toBe(410);
+		expect((await app.request('/config.backup')).status).toBe(410);
+		expect((await app.request('/app.js.orig')).status).toBe(410);
+		expect((await app.request('/file.swp')).status).toBe(410);
+	});
+
+	it('blocks environment and server info routes', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false }));
+		app.get('*', (c) => c.text('OK'));
+
+		// Environment files
+		expect((await app.request('/env.js')).status).toBe(410);
+		expect((await app.request('/_env')).status).toBe(410);
+		expect((await app.request('/config/secrets.env')).status).toBe(410);
+
+		// Server info routes
+		expect((await app.request('/server-status')).status).toBe(410);
+		expect((await app.request('/server-info')).status).toBe(410);
+		expect((await app.request('/info')).status).toBe(410);
+	});
+
+	it('blocks Swagger/OpenAPI config files', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false }));
+		app.get('*', (c) => c.text('OK'));
+
+		// Should block root and /api swagger files
+		expect((await app.request('/swagger.json')).status).toBe(410);
+		expect((await app.request('/swagger.yml')).status).toBe(410);
+		expect((await app.request('/api/swagger.json')).status).toBe(410);
+
+		// But allow swagger UI routes
+		const swaggerUI = await app.request('/api/docs/swagger');
+		expect(swaggerUI.status).toBe(200);
+	});
 });
