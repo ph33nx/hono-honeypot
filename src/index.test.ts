@@ -176,4 +176,40 @@ describe('honeypot middleware', () => {
 		const swaggerUI = await app.request('/api/docs/swagger');
 		expect(swaggerUI.status).toBe(200);
 	});
+
+	it('blocks WordPress internals anywhere in path', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false }));
+		app.get('*', (c) => c.text('OK'));
+
+		// WordPress internals should be blocked even in nested paths
+		expect((await app.request('/wp-includes/js/jquery.js')).status).toBe(410);
+		expect((await app.request('/wp-content/uploads/image.png')).status).toBe(410);
+		expect((await app.request('/foo/wp-admin/index.php')).status).toBe(410);
+		expect((await app.request('/wlwmanifest.xml')).status).toBe(410);
+	});
+
+	it('blocks env.js at root', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false }));
+		app.get('*', (c) => c.text('OK'));
+
+		// Should block root-level env.js (environment leak)
+		expect((await app.request('/env.js')).status).toBe(410);
+
+		// But allow other JS files (not our business to block)
+		const mainJs = await app.request('/main.js');
+		expect(mainJs.status).toBe(200);
+	});
+
+	it('normalizes double slashes to prevent bypass', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false }));
+		app.get('*', (c) => c.text('OK'));
+
+		// Double slash bypass attempts should still be blocked
+		expect((await app.request('//blog')).status).toBe(410);
+		expect((await app.request('///admin')).status).toBe(410);
+		expect((await app.request('/wp-admin//index.php')).status).toBe(410);
+	});
 });

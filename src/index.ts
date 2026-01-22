@@ -15,6 +15,8 @@ import { createMiddleware } from 'hono/factory';
  * - ^pattern$ = exact match (e.g., ^\/admin$ matches /admin, not /api/admin)
  * - ^pattern = starts with (e.g., ^\/wp- matches /wp-admin, not /api/wp-admin)
  * - pattern = substring match (use carefully)
+ *
+ * Note: Paths are normalized (double slashes collapsed) before matching
  */
 const ATTACK_PATTERNS = [
   // PHP patterns
@@ -28,6 +30,12 @@ const ATTACK_PATTERNS = [
   /^\/wp$/i,
   /^\/wp-/i,
   /^\/wordpress/i,
+
+  // WordPress internals (anywhere in path - these are ALWAYS attack probes)
+  /\/wp-includes\//i,
+  /\/wp-content\//i,
+  /\/wp-admin/i,
+  /wlwmanifest\.xml$/i, // Windows Live Writer manifest - WordPress-specific
 
   // Admin panels (exact matches)
   /^\/admin(\.php)?$/i,
@@ -61,7 +69,7 @@ const ATTACK_PATTERNS = [
   /^\/appsettings\.(json|yml|yaml)$/i,
   /^\/application\.(yml|yaml|xml|properties)$/i,
 
-  // JS files at public root
+  // JS files at root that leak environment info
   /^\/env\.js$/i,
 
   // Server info/status routes
@@ -211,7 +219,9 @@ export const honeypot = (options: HoneypotOptions = {}) => {
 	const status = options.status ?? 410;
 
 	return createMiddleware(async (c, next) => {
-		const path = c.req.path;
+		// Normalize path: collapse double slashes to single (bots use //blog/... to bypass)
+		const rawPath = c.req.path;
+		const path = rawPath.replace(/\/+/g, '/');
 
 		if (patterns.some((pattern) => pattern.test(path))) {
 			if (shouldLog) {
