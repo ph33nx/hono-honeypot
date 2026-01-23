@@ -1,17 +1,19 @@
 # hono-honeypot
 
-> Lightweight security middleware for Hono.js - block bots and vulnerability scanners with zero dependencies
+> Production-grade security middleware for Hono.js - ultrafast edge protection against malicious traffic
 
-Protect your Hono applications from WordPress attacks, PHP exploits, and brute-force attempts with this edge-ready honeypot middleware. Works seamlessly on Cloudflare Workers, Bun, Deno, and Node.js runtimes. Returns `410 Gone` for faster search engine deindexing and reduced bot retry attempts.
+Battle-tested honeypot middleware engineered specifically for the Hono.js framework. Built after analyzing hundreds of thousands of real-world bot requests across production systems, this middleware identifies and blocks automated attacks, vulnerability scanners, and malicious crawlers before they reach your application logic.
+
+Designed for Hono's ultrafast edge runtime architecture, delivering sub-millisecond pattern matching on Cloudflare Workers, Bun, Deno, and modern JavaScript runtimes. Returns `410 Gone` responses to permanently deter bots and accelerate search engine deindexing of non-existent resources.
 
 ## Features
 
 - ✅ **Zero dependencies** - Pure TypeScript pattern matching, no external libraries or runtime requirements
-- ⚡ **<1ms execution** - Early termination firewall logic with minimal CPU overhead
-- 🛡️ **Production-ready** - Blocks 80+ common web scraper and vulnerability scanner patterns
-- 🌍 **Universal edge support** - Deploy on Cloudflare Workers, Bun, Deno, Vercel Edge, Node.js
-- 🔧 **Customizable** - Add custom patterns or exclude built-in rules for your use case
-- 🚀 **SEO-friendly** - Uses 410 Gone status for faster Google/Bing deindexing
+- ⚡ **<1ms execution** - Early termination firewall logic with minimal CPU overhead, optimized for edge computing
+- 🛡️ **Production-ready** - Blocks 100+ attack vectors discovered from real production bot traffic analysis
+- 🌍 **Universal edge support** - Native compatibility with Cloudflare Workers, Bun, Deno, Vercel Edge, Node.js
+- 🔧 **Customizable** - Add custom patterns or exclude built-in rules for your specific use case
+- 🚀 **SEO-friendly** - Uses 410 Gone status for faster Google/Bing deindexing and reduced server load
 
 ## Installation
 
@@ -83,7 +85,7 @@ app.use('*', async (c, next) => {
 
 ## What It Blocks
 
-Intercepts 80+ common attack vectors including:
+Intercepts 100+ attack vectors discovered from real production traffic including:
 
 - **PHP vulnerability scanners**: `*.php`, `/phpinfo`, `/config.php`, `/eval-stdin.php`
 - **WordPress brute force**: `/wp-admin`, `/wp-login.php`, `/xmlrpc.php`, `/wp-config.php`
@@ -117,7 +119,7 @@ Returns `410 Gone` (not `404 Not Found`) for better bot deterrence and SEO hygie
 interface HoneypotOptions {
   /**
    * Add custom attack patterns to block (e.g., /internal, /private)
-   * Merged with built-in 80+ patterns
+   * Merged with built-in 100+ patterns
    */
   patterns?: RegExp[]
 

@@ -26,6 +26,13 @@ const ATTACK_PATTERNS = [
   /\/eval-stdin\.php/i,
   /\/xmlrpc\.php/i,
 
+  // Shell/backdoor patterns (anywhere in path)
+  /\/ALFA_DATA/i,
+  /\/c99\.php/i,
+  /\/r57\.php/i,
+  /\/shell\.php/i,
+  /\/webshell/i,
+
   // WordPress (anchored to root level to avoid catching /api/wordpress-integration)
   /^\/wp$/i,
   /^\/wp-/i,
@@ -36,6 +43,35 @@ const ATTACK_PATTERNS = [
   /\/wp-content\//i,
   /\/wp-admin/i,
   /wlwmanifest\.xml$/i, // Windows Live Writer manifest - WordPress-specific
+
+  // Generic upload/file directories (root level)
+  /^\/uploads?$/i,
+  /^\/images$/i,
+  /^\/assets$/i,
+  /^\/files$/i,
+  /^\/media$/i,
+  /^\/public$/i,
+
+  // Admin subdirectories (common exploit paths)
+  /\/admin\/(uploads?|images|editor|fckeditor|controller)/i,
+
+  // CMS/framework directories (root level)
+  /^\/modules$/i,
+  /^\/plugins$/i,
+  /^\/components$/i,
+  /^\/system$/i,
+  /^\/template$/i,
+  /^\/includes?$/i,
+  /^\/vendor$/i,
+  /^\/local$/i,
+  /^\/php$/i,
+
+  // CMS-specific exploit paths (anywhere in path)
+  /\/fckeditor\/editor\/filemanager/i, // FCKeditor file upload exploit
+  /\/sites\/default\/files/i, // Drupal
+  /\/images\/stories/i, // Joomla
+  /\/modules\/mod_simplefileupload/i, // Joomla upload exploit
+  /\/controller\/extension/i, // OpenCart
 
   // Admin panels (exact matches)
   /^\/admin(\.php)?$/i,

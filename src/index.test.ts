@@ -212,4 +212,79 @@ describe('honeypot middleware', () => {
 		expect((await app.request('///admin')).status).toBe(410);
 		expect((await app.request('/wp-admin//index.php')).status).toBe(410);
 	});
+
+	it('blocks shell backdoors and upload directory probes', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false }));
+		app.get('*', (c) => c.text('OK'));
+
+		// Shell backdoors
+		expect((await app.request('/ALFA_DATA')).status).toBe(410);
+		expect((await app.request('/c99.php')).status).toBe(410);
+		expect((await app.request('/shell.php')).status).toBe(410);
+
+		// Upload directories at root
+		expect((await app.request('/uploads')).status).toBe(410);
+		expect((await app.request('/upload')).status).toBe(410);
+		expect((await app.request('/images')).status).toBe(410);
+		expect((await app.request('/assets')).status).toBe(410);
+		expect((await app.request('/files')).status).toBe(410);
+
+		// But allow in API paths
+		expect((await app.request('/api/uploads')).status).toBe(200);
+		expect((await app.request('/api/images')).status).toBe(200);
+	});
+
+	it('blocks admin subdirectory exploits', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false }));
+		app.get('*', (c) => c.text('OK'));
+
+		// Admin subdirectories anywhere in path
+		expect((await app.request('/admin/uploads')).status).toBe(410);
+		expect((await app.request('/admin/images')).status).toBe(410);
+		expect((await app.request('/admin/editor')).status).toBe(410);
+		expect((await app.request('/admin/fckeditor')).status).toBe(410);
+		expect((await app.request('/admin/controller')).status).toBe(410);
+	});
+
+	it('blocks CMS-specific exploit paths', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false }));
+		app.get('*', (c) => c.text('OK'));
+
+		// FCKeditor
+		expect((await app.request('/admin/fckeditor/editor/filemanager')).status).toBe(410);
+
+		// Drupal
+		expect((await app.request('/sites/default/files')).status).toBe(410);
+
+		// Joomla
+		expect((await app.request('/images/stories')).status).toBe(410);
+		expect((await app.request('/modules/mod_simplefileupload/elements')).status).toBe(410);
+
+		// OpenCart
+		expect((await app.request('/admin/controller/extension/extension')).status).toBe(410);
+	});
+
+	it('blocks generic CMS directory probes', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false }));
+		app.get('*', (c) => c.text('OK'));
+
+		// Generic directories at root
+		expect((await app.request('/modules')).status).toBe(410);
+		expect((await app.request('/plugins')).status).toBe(410);
+		expect((await app.request('/components')).status).toBe(410);
+		expect((await app.request('/system')).status).toBe(410);
+		expect((await app.request('/template')).status).toBe(410);
+		expect((await app.request('/include')).status).toBe(410);
+		expect((await app.request('/vendor')).status).toBe(410);
+		expect((await app.request('/local')).status).toBe(410);
+		expect((await app.request('/php')).status).toBe(410);
+		expect((await app.request('/public')).status).toBe(410);
+
+		// But allow nested legitimate paths
+		expect((await app.request('/api/modules')).status).toBe(200);
+	});
 });

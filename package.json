@@ -1,6 +1,6 @@
 {
 	"name": "hono-honeypot",
-	"version": "1.0.2",
+	"version": "1.0.3",
 	"description": "Zero-dependency honeypot middleware for Hono.js that blocks bot attacks and vulnerability scanners",
 	"type": "module",
 	"main": "./dist/index.cjs",
