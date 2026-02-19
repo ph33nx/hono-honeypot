@@ -105,6 +105,14 @@ const ATTACK_PATTERNS = [
   /^\/appsettings\.(json|yml|yaml)$/i,
   /^\/application\.(yml|yaml|xml|properties)$/i,
 
+  // FTP/SFTP config files (credential leak probes)
+  /sftp-config\.json$/i,
+  /ftpsync\.settings$/i,
+  /\.ftpconfig$/i,
+  /\.ftppass$/i,
+  /\.remote-sync\.json$/i,
+  /ftp-deploy\.json$/i,
+
   // JS files at root that leak environment info
   /^\/env\.js$/i,
 
