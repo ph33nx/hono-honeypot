@@ -10,7 +10,7 @@ Designed for Hono's ultrafast edge runtime architecture, delivering sub-millisec
 
 - ✅ **Zero dependencies** - Pure TypeScript pattern matching, no external libraries or runtime requirements
 - ⚡ **<1ms execution** - Early termination firewall logic with minimal CPU overhead, optimized for edge computing
-- 🛡️ **Production-ready** - Blocks 100+ attack vectors discovered from real production bot traffic analysis
+- 🛡️ **Production-ready** - Blocks 150+ attack vectors discovered from real production bot traffic analysis
 - 🌍 **Universal edge support** - Native compatibility with Cloudflare Workers, Bun, Deno, Vercel Edge, Node.js
 - 🔧 **Customizable** - Add custom patterns or exclude built-in rules for your specific use case
 - 🚀 **SEO-friendly** - Uses 410 Gone status for faster Google/Bing deindexing and reduced server load
@@ -85,22 +85,29 @@ app.use('*', async (c, next) => {
 
 ## What It Blocks
 
-Intercepts 100+ attack vectors discovered from real production traffic including:
+Intercepts 150+ attack vectors discovered from real production traffic including:
 
 - **PHP vulnerability scanners**: `*.php`, `/phpinfo`, `/config.php`, `/eval-stdin.php`
 - **WordPress brute force**: `/wp-admin`, `/wp-login.php`, `/xmlrpc.php`, `/wp-config.php`
 - **Admin panel enumeration**: `/admin`, `/phpmyadmin`, `/cpanel`, `/cgi-bin`
 - **CMS framework exploits**: `/typo3`, `/joomla`, `/drupal`, `/magento`
-- **Sensitive file probing**: `/.env`, `/.git`, `*.sql`, `/node_modules`, `/database.yml`
-- **Backup file discovery**: `/backup`, `/old`, `/test`, `/demo`, `/temp`
-- **Auth endpoint scanning**: `/login`, `/register`, `/dashboard` (exact matches only)
+- **JS framework fingerprinting**: `/_next`, `/_rsc`, `/_vercel`, `next.config.js`, `nuxt.config.ts`
+- **Deployment config probes**: `serverless.yml`, `vercel.json`, `netlify.toml`, `package.json`
+- **Docker/container probes**: `docker-compose.yml`, `Dockerfile`, `/docker/`
+- **AWS/cloud credential probes**: `/aws/*`, `aws_s3`, `aws_ses`
+- **Sensitive file probing**: `/.env`, `/.git`, `*.sql`, `/node_modules`
+- **System path traversal**: `/var/task/`, `/var/log/`, `/opt/`
+- **Command injection via URL**: `$(pwd)`, backtick patterns
+- **Log file probes**: `*.log`, `error_log`, `debug.log`
+- **Java/Tomcat/Solr probes**: `/WEB-INF`, `/manager/html`, `/solr`
+- **Backup file discovery**: `/backup`, `/old`, `/test`, `/demo`
 - **Directory brute force**: `/2017`, `/2018`, etc. (year-based folder guessing)
 - **Web shell detection**: `/shell.php`, `/c99.php`, `/r57.php`
 
 **Smart anchoring prevents false positives:**
 - ✅ Blocks `/admin` but allows `/api/admin`
-- ✅ Blocks `/blog` but allows `/blogs`
-- ✅ Blocks `/login` but allows `/api/auth/login`
+- ✅ Allows `/login`, `/signup`, `/blog`, `/dashboard` (legitimate app routes)
+- ✅ Blocks `/wp-admin` but allows `/api/wordpress-integration`
 
 ## Why 410 Gone?
 

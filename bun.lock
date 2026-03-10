@@ -5,11 +5,11 @@
     "": {
       "name": "hono-honeypot",
       "devDependencies": {
-        "@types/bun": "latest",
-        "hono": "latest",
-        "tsup": "latest",
-        "typescript": "latest",
-        "vitest": "latest",
+        "@types/bun": "^1.3.5",
+        "hono": "^4.11.3",
+        "tsup": "^8.5.1",
+        "typescript": "^5.9.3",
+        "vitest": "^4.0.16",
       },
       "peerDependencies": {
         "hono": "^4.0.0",

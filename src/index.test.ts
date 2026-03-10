@@ -40,16 +40,14 @@ describe('honeypot middleware', () => {
 		expect(await res.text()).toBe('OK');
 	});
 
-	it('allows /blogs but blocks /blog', async () => {
+	it('allows /blogs and /blog (legitimate user paths)', async () => {
 		const app = new Hono();
 		app.use('*', honeypot({ log: false }));
 		app.get('/blogs', (c) => c.text('Blogs'));
+		app.get('/blog', (c) => c.text('Blog'));
 
-		const blogsRes = await app.request('/blogs');
-		expect(blogsRes.status).toBe(200);
-
-		const blogRes = await app.request('/blog');
-		expect(blogRes.status).toBe(410);
+		expect((await app.request('/blogs')).status).toBe(200);
+		expect((await app.request('/blog')).status).toBe(200);
 	});
 
 	it('supports custom patterns', async () => {
@@ -189,6 +187,111 @@ describe('honeypot middleware', () => {
 		expect((await app.request('/wlwmanifest.xml')).status).toBe(410);
 	});
 
+	it('allows /login, /signup, /dashboard (legitimate user paths)', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false }));
+		app.get('/login', (c) => c.text('Login'));
+		app.get('/signup', (c) => c.text('Signup'));
+		app.get('/dashboard', (c) => c.text('Dashboard'));
+
+		expect((await app.request('/login')).status).toBe(200);
+		expect((await app.request('/signup')).status).toBe(200);
+		expect((await app.request('/dashboard')).status).toBe(200);
+	});
+
+	it('blocks Next.js/Nuxt/Vercel framework probes', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false }));
+		app.get('*', (c) => c.text('OK'));
+
+		expect((await app.request('/_next/webpack-hmr')).status).toBe(410);
+		expect((await app.request('/_rsc')).status).toBe(410);
+		expect((await app.request('/__rsc')).status).toBe(410);
+		expect((await app.request('/_vercel/insights')).status).toBe(410);
+		expect((await app.request('/var/task/next.config.js')).status).toBe(410);
+		expect((await app.request('/app/nuxt.config.ts')).status).toBe(410);
+		expect((await app.request('/craco.config.js')).status).toBe(410);
+	});
+
+	it('blocks deployment config probes', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false }));
+		app.get('*', (c) => c.text('OK'));
+
+		expect((await app.request('/var/task/serverless.yml')).status).toBe(410);
+		expect((await app.request('/vercel.json')).status).toBe(410);
+		expect((await app.request('/netlify.toml')).status).toBe(410);
+		expect((await app.request('/helm/values.yaml')).status).toBe(410);
+		expect((await app.request('/package.json')).status).toBe(410);
+		expect((await app.request('/app/package.json')).status).toBe(410);
+	});
+
+	it('blocks Docker config probes', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false }));
+		app.get('*', (c) => c.text('OK'));
+
+		expect((await app.request('/docker-compose.yml')).status).toBe(410);
+		expect((await app.request('/Dockerfile')).status).toBe(410);
+		expect((await app.request('/docker/registry/config.yml')).status).toBe(410);
+	});
+
+	it('blocks AWS credential probes', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false }));
+		app.get('*', (c) => c.text('OK'));
+
+		expect((await app.request('/aws/bucket')).status).toBe(410);
+		expect((await app.request('/aws/s3/credentials')).status).toBe(410);
+		expect((await app.request('/aws_s3_config.json')).status).toBe(410);
+	});
+
+	it('blocks system path traversal probes', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false }));
+		app.get('*', (c) => c.text('OK'));
+
+		expect((await app.request('/var/task/next.config.js')).status).toBe(410);
+		expect((await app.request('/var/log/apache2/access.log')).status).toBe(410);
+		expect((await app.request('/opt/mailcow-dockerized/mailcow.conf')).status).toBe(410);
+	});
+
+	it('blocks command injection via URL path', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false }));
+		app.get('*', (c) => c.text('OK'));
+
+		expect((await app.request('/$(pwd)/serverless.yml')).status).toBe(410);
+	});
+
+	it('blocks log file and error_log probes', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false }));
+		app.get('*', (c) => c.text('OK'));
+
+		expect((await app.request('/log/production.log')).status).toBe(410);
+		expect((await app.request('/debug.log')).status).toBe(410);
+		expect((await app.request('/error_log')).status).toBe(410);
+	});
+
+	it('blocks Java/Tomcat/Solr probes', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false }));
+		app.get('*', (c) => c.text('OK'));
+
+		expect((await app.request('/WEB-INF/web.xml')).status).toBe(410);
+		expect((await app.request('/manager/html')).status).toBe(410);
+		expect((await app.request('/solr/admin')).status).toBe(410);
+	});
+
+	it('blocks mail server config probes', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false }));
+		app.get('*', (c) => c.text('OK'));
+
+		expect((await app.request('/opt/mailcow-dockerized/mailcow.conf')).status).toBe(410);
+	});
+
 	it('blocks env.js at root', async () => {
 		const app = new Hono();
 		app.use('*', honeypot({ log: false }));
@@ -208,9 +311,9 @@ describe('honeypot middleware', () => {
 		app.get('*', (c) => c.text('OK'));
 
 		// Double slash bypass attempts should still be blocked
-		expect((await app.request('//blog')).status).toBe(410);
 		expect((await app.request('///admin')).status).toBe(410);
 		expect((await app.request('/wp-admin//index.php')).status).toBe(410);
+		expect((await app.request('//wp-content/uploads')).status).toBe(410);
 	});
 
 	it('blocks shell backdoors and upload directory probes', async () => {

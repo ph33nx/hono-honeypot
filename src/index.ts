@@ -142,14 +142,6 @@ const ATTACK_PATTERNS = [
   // Shell/exploit patterns (anchored to root)
   /^\/shell/i,
 
-  // Auth routes (exact matches only)
-  /^\/login$/i,
-  /^\/signin$/i,
-  /^\/register$/i,
-  /^\/signup$/i,
-  /^\/dashboard$/i,
-  /^\/user\/(login|signin|register|signup)/i,
-
   // Brute force discovery patterns (exact matches - year folders like /2017, common test paths)
   /^\/old$/i,
   /^\/new$/i,
@@ -159,13 +151,72 @@ const ATTACK_PATTERNS = [
   /^\/main$/i,
   /^\/site$/i,
   /^\/shop$/i,
-  /^\/blog$/i, // Exact /blog only (not /blogs)
   /^\/bc$/i,
   /^\/sitio$/i,
   /^\/sito$/i,
   /^\/oldsite$/i,
   /^\/old-site$/i,
   /^\/\d{4}$/i, // 4-digit years: /2017, /2018, etc.
+
+  // Command injection probes
+  /^\/getcmd$/i,
+
+  // ─── JS framework fingerprinting (Next.js, Nuxt, React, Vercel) ─────
+  // Probes for framework internals - bots scanning for Next/Nuxt/React apps
+  /^\/_next/i,
+  /^\/_rsc/i,
+  /^\/__rsc/i,
+  /^\/_vercel/i,
+  /next\.config\.(js|mjs|ts)$/i,
+  /nuxt\.config\.(js|ts)$/i,
+  /craco\.config\.js$/i,
+
+  // ─── Deployment/infra config probes ─────────────────────────────────
+  // Serverless, Vercel, Netlify, Helm configs should never be web-accessible
+  /serverless\.(yml|yaml|json)$/i,
+  /vercel\.json$/i,
+  /netlify\.toml$/i,
+  /\/helm\//i,
+
+  // ─── Package manager files ─────────────────────────────────────────
+  // Bots probe for dependency info to find vulnerable packages
+  /\/package\.json$/i,
+
+  // ─── Docker/container config probes ─────────────────────────────────
+  // Dockerfile, compose files, registry configs - infrastructure leak attempts
+  /docker-compose\.(yml|yaml)$/i,
+  /Dockerfile$/i,
+  /\/docker\//i,
+
+  // ─── AWS/cloud credential probes ────────────────────────────────────
+  // S3 buckets, SES smtp, cloud configs - credential leak attempts
+  /^\/aws/i,
+  /\/aws[_-]s3/i,
+  /\/aws[_-]ses/i,
+
+  // ─── System path traversal probes ───────────────────────────────────
+  // /var/task/ (Lambda), /var/log/ (syslog), /opt/ (system packages) - never web-accessible
+  /^\/var\//i,
+  /^\/opt\//i,
+
+  // ─── Command injection via URL path ─────────────────────────────────
+  // $(cmd) and backtick patterns in URLs are always malicious
+  /\$\(/,
+  /`/,
+
+  // ─── Log file probes ───────────────────────────────────────────────
+  // .log files, error_log - application log leak attempts
+  /\.log$/i,
+  /\/error_log$/i,
+
+  // ─── Java/Tomcat/Solr probes ────────────────────────────────────────
+  // WEB-INF, Tomcat manager, Solr admin - Java app server exploit attempts
+  /\/WEB-INF/i,
+  /^\/manager\/html/i,
+  /^\/solr/i,
+
+  // ─── Mail server config probes ──────────────────────────────────────
+  /\/mailcow/i,
 ]
 
 /**
