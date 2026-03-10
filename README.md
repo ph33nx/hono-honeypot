@@ -1,206 +1,319 @@
 # hono-honeypot
 
-> Production-grade security middleware for Hono.js - ultrafast edge protection against malicious traffic
+Production-grade security middleware for [Hono.js](https://hono.dev). Intercepts vulnerability scanners, bot crawlers, and brute-force probes before they reach your application logic.
 
-Battle-tested honeypot middleware engineered specifically for the Hono.js framework. Built after analyzing hundreds of thousands of real-world bot requests across production systems, this middleware identifies and blocks automated attacks, vulnerability scanners, and malicious crawlers before they reach your application logic.
+Built from analyzing hundreds of thousands of real-world malicious requests in production. Pattern matching runs in sub-millisecond time across all Hono runtimes: Cloudflare Workers, Bun, Deno, Node.js, Vercel Edge, and Fastly Compute.
 
-Designed for Hono's ultrafast edge runtime architecture, delivering sub-millisecond pattern matching on Cloudflare Workers, Bun, Deno, and modern JavaScript runtimes. Returns `410 Gone` responses to permanently deter bots and accelerate search engine deindexing of non-existent resources.
-
-## Features
-
-- ✅ **Zero dependencies** - Pure TypeScript pattern matching, no external libraries or runtime requirements
-- ⚡ **<1ms execution** - Early termination firewall logic with minimal CPU overhead, optimized for edge computing
-- 🛡️ **Production-ready** - Blocks 150+ attack vectors discovered from real production bot traffic analysis
-- 🌍 **Universal edge support** - Native compatibility with Cloudflare Workers, Bun, Deno, Vercel Edge, Node.js
-- 🔧 **Customizable** - Add custom patterns or exclude built-in rules for your specific use case
-- 🚀 **SEO-friendly** - Uses 410 Gone status for faster Google/Bing deindexing and reduced server load
-
-## Installation
+## Install
 
 ```bash
 npm install hono-honeypot
-# or
-pnpm add hono-honeypot
-# or
-bun add hono-honeypot
 ```
 
-## Usage
-
-### Basic Setup
+## Quick Start
 
 ```typescript
 import { Hono } from 'hono'
 import { honeypot } from 'hono-honeypot'
 
 const app = new Hono()
-
-// Apply globally (recommended - place early in middleware chain)
 app.use('*', honeypot())
-
-app.get('/', (c) => c.text('Hello!'))
-
-export default app
 ```
 
-### With Options
+That's it. 150+ attack patterns are blocked out of the box. Every option below is **optional**.
+
+---
+
+## API Reference
+
+### `honeypot(options?)`
+
+Returns Hono middleware. All options are optional.
 
 ```typescript
-import { honeypot } from 'hono-honeypot'
-
 app.use('*', honeypot({
-  // Add custom attack patterns to block
-  patterns: [
-    /^\/custom-admin/i,
-    /^\/secret/i,
-  ],
-
-  // Exclude built-in patterns (e.g., allow /admin for your own routes)
-  exclude: [
-    /^\/admin$/i, // Allow /admin but still block other admin patterns
-  ],
-
-  // Enable request logging (default: true)
-  log: true,
-
-  // HTTP status code (default: 410 Gone for faster bot deterrence)
-  status: 410, // or 403 Forbidden, 404 Not Found
+  patterns,          // RegExp[]           — additional patterns to block
+  exclude,           // RegExp[]           — built-in patterns to remove
+  status,            // 410 | 404 | 403    — response status (default: 410)
+  store,             // HoneypotStore      — enables IP strike/ban system
+  strikeThreshold,   // number             — strikes before ban (default: 3)
+  getIP,             // (c: Context) => string — custom IP extraction
+  onBlocked,         // (info: BlockInfo) => void — custom block handler
+  log,               // boolean            — console logging (default: true)
 }))
 ```
 
-### Protect Specific Routes
+---
 
-```typescript
-// Only protect API routes
-app.use('/api/*', honeypot())
+## Features
 
-// Exclude certain paths
-app.use('*', async (c, next) => {
-  if (c.req.path.startsWith('/public')) {
-    return next()
-  }
-  return honeypot()(c, next)
-})
+### Pattern Matching (stateless, zero-config)
+
+Out of the box, the middleware matches request paths against 150+ regex patterns covering:
+
+| Category | Examples |
+|----------|----------|
+| PHP/WordPress | `*.php`, `/wp-admin`, `/xmlrpc.php`, `/wp-content/` |
+| Admin panels | `/admin`, `/phpmyadmin`, `/cpanel`, `/cgi-bin` |
+| CMS frameworks | `/typo3`, `/joomla`, `/drupal`, `/magento` |
+| JS framework fingerprinting | `/_next`, `/_rsc`, `/_vercel`, `next.config.js`, `nuxt.config.ts` |
+| Deployment configs | `serverless.yml`, `vercel.json`, `netlify.toml`, `package.json` |
+| Docker/container | `docker-compose.yml`, `Dockerfile`, `/docker/` |
+| AWS/cloud credentials | `/aws/*`, `aws_s3`, `aws_ses`, `/.aws/` |
+| Version control | `/.git/`, `/.svn/`, `/.hg/` |
+| Sensitive files | `/.env`, `/.htaccess`, `/.htpasswd`, `*.sql` |
+| SSH/auth tokens | `/.ssh/`, `/id_rsa`, `/.npmrc`, `/.pypirc` |
+| System path traversal | `/var/task/`, `/var/log/`, `/opt/` |
+| Command injection | `$(pwd)`, backtick injection |
+| Log files | `*.log`, `error_log` |
+| Java/Spring Boot | `/WEB-INF`, `/manager/html`, `/solr`, `/actuator` |
+| Dependency manifests | `composer.json`, `Gemfile`, `requirements.txt` |
+| WYSIWYG editors | `/ckeditor`, `/tinymce`, `/elfinder` |
+| OS metadata | `.DS_Store`, `Thumbs.db` |
+| Backup files | `*.bak`, `*.old`, `*.backup`, `*.swp` |
+| Brute force discovery | `/old`, `/test`, `/demo`, `/2017`, `/2024` |
+
+Patterns use smart anchoring to prevent false positives:
+
+```
+/admin     → blocked (exact root match)
+/api/admin → allowed (nested path, not root)
+/login     → allowed (legitimate app route)
+/blog      → allowed (legitimate app route)
 ```
 
-## What It Blocks
+### Custom Patterns
 
-Intercepts 150+ attack vectors discovered from real production traffic including:
-
-- **PHP vulnerability scanners**: `*.php`, `/phpinfo`, `/config.php`, `/eval-stdin.php`
-- **WordPress brute force**: `/wp-admin`, `/wp-login.php`, `/xmlrpc.php`, `/wp-config.php`
-- **Admin panel enumeration**: `/admin`, `/phpmyadmin`, `/cpanel`, `/cgi-bin`
-- **CMS framework exploits**: `/typo3`, `/joomla`, `/drupal`, `/magento`
-- **JS framework fingerprinting**: `/_next`, `/_rsc`, `/_vercel`, `next.config.js`, `nuxt.config.ts`
-- **Deployment config probes**: `serverless.yml`, `vercel.json`, `netlify.toml`, `package.json`
-- **Docker/container probes**: `docker-compose.yml`, `Dockerfile`, `/docker/`
-- **AWS/cloud credential probes**: `/aws/*`, `aws_s3`, `aws_ses`
-- **Sensitive file probing**: `/.env`, `/.git`, `*.sql`, `/node_modules`
-- **System path traversal**: `/var/task/`, `/var/log/`, `/opt/`
-- **Command injection via URL**: `$(pwd)`, backtick patterns
-- **Log file probes**: `*.log`, `error_log`, `debug.log`
-- **Java/Tomcat/Solr probes**: `/WEB-INF`, `/manager/html`, `/solr`
-- **Backup file discovery**: `/backup`, `/old`, `/test`, `/demo`
-- **Directory brute force**: `/2017`, `/2018`, etc. (year-based folder guessing)
-- **Web shell detection**: `/shell.php`, `/c99.php`, `/r57.php`
-
-**Smart anchoring prevents false positives:**
-- ✅ Blocks `/admin` but allows `/api/admin`
-- ✅ Allows `/login`, `/signup`, `/blog`, `/dashboard` (legitimate app routes)
-- ✅ Blocks `/wp-admin` but allows `/api/wordpress-integration`
-
-## Why 410 Gone?
-
-Returns `410 Gone` (not `404 Not Found`) for better bot deterrence and SEO hygiene:
-
-- **Search engine optimization**: Google and Bing prioritize `410` responses for permanent removal from search indexes
-- **Bot mitigation**: Web scrapers and vulnerability scanners stop retrying sooner, reducing server load
-- **Bandwidth savings**: Empty response body conserves bandwidth during high-volume DDoS-style attacks
-- **Security best practice**: Signals permanent unavailability, not temporary 404 errors that encourage retry logic
-
-## Configuration
-
-### Options API
+Add application-specific patterns. Merged with the built-in set.
 
 ```typescript
-interface HoneypotOptions {
-  /**
-   * Add custom attack patterns to block (e.g., /internal, /private)
-   * Merged with built-in 100+ patterns
-   */
-  patterns?: RegExp[]
+app.use('*', honeypot({
+  patterns: [
+    /^\/internal-api/i,
+    /^\/debug/i,
+  ],
+}))
+```
 
-  /**
-   * Exclude specific built-in patterns (e.g., allow /admin for your own routes)
-   * Useful when you need legitimate routes that match attack patterns
-   */
-  exclude?: RegExp[]
+### Excluding Built-in Patterns
 
-  /**
-   * Log blocked requests to console with 🍯 emoji and IP address
-   * @default true
-   */
-  log?: boolean
+Remove specific built-in patterns by matching their regex source string.
 
-  /**
-   * HTTP status code to return for blocked requests
-   * @default 410 - 410 Gone (fastest bot deterrence + search engine deindexing)
-   *          404 - Not Found (standard but encourages bot retries)
-   *          403 - Forbidden (signals authentication issue, may trigger escalation)
-   */
-  status?: 410 | 404 | 403
+```typescript
+app.use('*', honeypot({
+  exclude: [
+    /^\/admin(\.php)?$/i,  // Allow your own /admin route
+  ],
+}))
+```
+
+### Response Status
+
+Default is `410 Gone`. Alternatives: `404`, `403`.
+
+```typescript
+app.use('*', honeypot({ status: 404 }))
+```
+
+Why `410 Gone` is the default:
+- Google and Bing prioritize `410` for faster deindexing over `404`
+- Scanners with retry logic treat `410` as permanent and stop faster than `404`
+- Empty response body minimizes bandwidth under high-volume probing
+
+---
+
+## IP Strike/Ban System
+
+Without a store, the middleware is stateless: it blocks matching paths but imposes no penalty on repeat offenders. With a store, it tracks strikes per IP and bans IPs that exceed the threshold.
+
+**Flow:**
+1. Request matches attack pattern → strike recorded against IP
+2. IP reaches `strikeThreshold` (default: 3) → IP is banned
+3. Banned IP sends any request → instant `410` response, no pattern matching needed (O(1) lookup)
+
+### MemoryStore (built-in)
+
+In-process Map-based store with lazy TTL expiry. Suitable for single-process deployments and development.
+
+```typescript
+import { honeypot, MemoryStore } from 'hono-honeypot'
+
+app.use('*', honeypot({
+  store: new MemoryStore({
+    strikeTTL: 3600,    // optional — strike window in seconds (default: 3600 / 1 hour)
+    banTTL: 86400,      // optional — ban duration in seconds (default: 86400 / 24 hours)
+  }),
+  strikeThreshold: 3,   // optional — default: 3
+}))
+```
+
+> **Note:** MemoryStore state is per-isolate. In multi-process, clustered, or serverless environments, use a shared store (Redis, KV, etc.).
+
+### Custom Store (Redis, KV, etc.)
+
+Implement the `HoneypotStore` interface to use any storage backend. All methods may return sync values or Promises.
+
+```typescript
+interface HoneypotStore {
+  /** Check if IP is banned. Called before pattern matching (fast path). */
+  isBanned(ip: string): Promise<boolean> | boolean
+
+  /** Record a strike. Return new total count. */
+  addStrike(ip: string): Promise<number> | number
+
+  /** Ban an IP. Called when strikes >= threshold. */
+  ban(ip: string): Promise<void> | void
+
+  /** Clear strikes. Called after ban is set. */
+  resetStrikes(ip: string): Promise<void> | void
 }
 ```
 
-### Logging Output
+#### Redis example (ioredis)
 
-```bash
-🍯 Blocked [192.168.1.1] GET /wp-admin
-🍯 Blocked [203.0.113.5] POST /phpmyadmin
-🍯 Blocked [198.51.100.42] HEAD /backup
+```typescript
+import type { HoneypotStore } from 'hono-honeypot'
+import Redis from 'ioredis'
+
+const redis = new Redis()
+
+const redisStore: HoneypotStore = {
+  async isBanned(ip) {
+    return (await redis.exists(`honeypot:ban:${ip}`)) === 1
+  },
+  async addStrike(ip) {
+    const key = `honeypot:strikes:${ip}`
+    const count = await redis.incr(key)
+    if (count === 1) await redis.expire(key, 3600)
+    return count
+  },
+  async ban(ip) {
+    await redis.setex(`honeypot:ban:${ip}`, 86400, '1')
+  },
+  async resetStrikes(ip) {
+    await redis.del(`honeypot:strikes:${ip}`)
+  },
+}
+
+app.use('*', honeypot({ store: redisStore }))
 ```
+
+#### Cloudflare KV example
+
+```typescript
+import type { HoneypotStore } from 'hono-honeypot'
+
+function createKVStore(kv: KVNamespace): HoneypotStore {
+  return {
+    async isBanned(ip) {
+      return (await kv.get(`honeypot:ban:${ip}`)) !== null
+    },
+    async addStrike(ip) {
+      const key = `honeypot:strikes:${ip}`
+      const current = parseInt((await kv.get(key)) || '0')
+      const count = current + 1
+      await kv.put(key, String(count), { expirationTtl: 3600 })
+      return count
+    },
+    async ban(ip) {
+      await kv.put(`honeypot:ban:${ip}`, '1', { expirationTtl: 86400 })
+    },
+    async resetStrikes(ip) {
+      await kv.delete(`honeypot:strikes:${ip}`)
+    },
+  }
+}
+
+app.use('*', honeypot({ store: createKVStore(env.KV) }))
+```
+
+---
+
+## IP Extraction
+
+Default extraction chain: `cf-connecting-ip` > `x-forwarded-for` (first entry) > `x-real-ip` > `'unknown'`.
+
+IPs resolving to `'unknown'` or empty string are not tracked by the strike system (prevents false bans when IP cannot be determined).
+
+Override with a custom function:
+
+```typescript
+app.use('*', honeypot({
+  getIP: (c) => c.req.header('x-real-ip') || 'unknown',
+}))
+```
+
+---
+
+## Block Handler (`onBlocked`)
+
+Custom callback fired on every blocked request. When provided, suppresses built-in console logging.
+
+```typescript
+app.use('*', honeypot({
+  onBlocked: (info) => {
+    // info.ip       — client IP
+    // info.path     — normalized request path
+    // info.method   — HTTP method
+    // info.reason   — 'pattern' | 'banned'
+    // info.strikes  — current strike count (when store is active, pattern matches only)
+    // info.banned   — true if this request triggered a new ban
+
+    logger.warn(`honeypot: ${info.reason} ${info.ip} ${info.method} ${info.path}`)
+
+    if (info.banned) {
+      metrics.increment('honeypot.bans')
+    }
+  },
+}))
+```
+
+Without `onBlocked`, the middleware logs to console when `log: true` (default):
+
+```
+🍯 Blocked [203.0.113.5] GET /wp-admin
+🚫 Banned [203.0.113.5] GET /.env BANNED
+```
+
+Set `log: false` to suppress all output:
+
+```typescript
+app.use('*', honeypot({ log: false }))
+```
+
+---
+
+## Exports
+
+```typescript
+import { honeypot, MemoryStore } from 'hono-honeypot'
+import type { HoneypotOptions, HoneypotStore, BlockInfo } from 'hono-honeypot'
+```
+
+| Export | Type | Description |
+|--------|------|-------------|
+| `honeypot` | function | Middleware factory |
+| `MemoryStore` | class | Built-in in-memory store |
+| `HoneypotOptions` | interface | Options type |
+| `HoneypotStore` | interface | Store adapter contract |
+| `BlockInfo` | interface | Block event payload |
+
+---
 
 ## Performance
 
-- **Overhead**: <1ms per request
-- **Memory**: ~8KB (pattern array)
-- **CPU**: Minimal (regex matching, short-circuits on first match)
+| Metric | Value |
+|--------|-------|
+| Pattern matching overhead | <1ms per request |
+| Ban check (store) | O(1) lookup, runs before pattern matching |
+| Memory footprint | ~10KB (pattern array) |
+| Bundle size | Zero dependencies beyond `hono` peer dep |
 
-## Best Practices
+---
 
-1. **Place early** in middleware chain (before rate limiters, authentication, and business logic)
-2. **Use exclude option** if you have legitimate routes matching attack patterns (e.g., `/admin` dashboard)
-3. **Test thoroughly** with your application routes to prevent false positives blocking real users
-4. **Monitor logs** in staging/production to identify new attack vectors and emerging bot patterns
-5. **Add custom patterns** specific to your application architecture (internal endpoints, legacy routes)
-6. **Combine with rate limiting** for defense-in-depth security strategy
-7. **Review periodically** to update patterns as new vulnerabilities and scanning techniques emerge
+## Runtime Compatibility
 
-## Framework Compatibility
-
-Works with all Hono.js runtimes:
-
-- ✅ Cloudflare Workers
-- ✅ Bun
-- ✅ Deno
-- ✅ Node.js
-- ✅ Vercel Edge Functions
-- ✅ Fastly Compute
-
-## Migration from Express
-
-```typescript
-// Before (Express)
-app.use((req, res, next) => {
-  if (req.path.includes('wp-admin')) {
-    return res.status(410).end()
-  }
-  next()
-})
-
-// After (Hono)
-app.use('*', honeypot())
-```
+Tested on all Hono.js runtimes: Cloudflare Workers, Bun, Deno, Node.js (>=18), Vercel Edge Functions, Fastly Compute.
 
 ## Contributing
 
@@ -208,4 +321,4 @@ Issues and PRs welcome at [github.com/ph33nx/hono-honeypot](https://github.com/p
 
 ## License
 
-MIT © [ph33nx](https://github.com/ph33nx)
+MIT

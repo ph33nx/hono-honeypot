@@ -1,33 +1,33 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Hono } from 'hono';
-import { honeypot } from './index';
+import { honeypot, MemoryStore } from './index';
+import type { BlockInfo } from './index';
+
+// ─── Helper ─────────────────────────────────────────────────────────────
+
+function makeApp(options: Parameters<typeof honeypot>[0] = {}) {
+	const app = new Hono();
+	app.use('*', honeypot({ log: false, ...options }));
+	app.get('*', (c) => c.text('OK'));
+	return app;
+}
+
+// ─── Pattern Matching ───────────────────────────────────────────────────
 
 describe('honeypot middleware', () => {
 	it('blocks WordPress paths', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
-		app.get('*', (c) => c.text('OK'));
-
-		const res = await app.request('/wp-admin');
-		expect(res.status).toBe(410);
+		const app = makeApp();
+		expect((await app.request('/wp-admin')).status).toBe(410);
 	});
 
 	it('blocks PHP files', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
-		app.get('*', (c) => c.text('OK'));
-
-		const res = await app.request('/config.php');
-		expect(res.status).toBe(410);
+		const app = makeApp();
+		expect((await app.request('/config.php')).status).toBe(410);
 	});
 
 	it('blocks admin panel attempts', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
-		app.get('*', (c) => c.text('OK'));
-
-		const res = await app.request('/admin');
-		expect(res.status).toBe(410);
+		const app = makeApp();
+		expect((await app.request('/admin')).status).toBe(410);
 	});
 
 	it('allows legitimate routes', async () => {
@@ -50,143 +50,6 @@ describe('honeypot middleware', () => {
 		expect((await app.request('/blog')).status).toBe(200);
 	});
 
-	it('supports custom patterns', async () => {
-		const app = new Hono();
-		app.use(
-			'*',
-			honeypot({
-				patterns: [/^\/secret/i],
-				log: false,
-			})
-		);
-		app.get('*', (c) => c.text('OK'));
-
-		const res = await app.request('/secret');
-		expect(res.status).toBe(410);
-	});
-
-	it('supports custom status codes', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ status: 403, log: false }));
-		app.get('*', (c) => c.text('OK'));
-
-		const res = await app.request('/wp-admin');
-		expect(res.status).toBe(403);
-	});
-
-	it('blocks year folders', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
-		app.get('*', (c) => c.text('OK'));
-
-		const res2017 = await app.request('/2017');
-		expect(res2017.status).toBe(410);
-
-		const res2024 = await app.request('/2024');
-		expect(res2024.status).toBe(410);
-
-		// Should NOT block non-year patterns
-		const resAbcd = await app.request('/abcd');
-		expect(resAbcd.status).toBe(200);
-
-		const res12345 = await app.request('/12345');
-		expect(res12345.status).toBe(200);
-	});
-
-	it('allows excluding built-in patterns', async () => {
-		const app = new Hono();
-		app.use(
-			'*',
-			honeypot({
-				exclude: [/^\/admin(\.php)?$/i], // Allow /admin for own dashboard (exact pattern match)
-				log: false,
-			})
-		);
-		app.get('/admin', (c) => c.text('Admin Dashboard'));
-		app.get('*', (c) => c.text('OK'));
-
-		// /admin should now be allowed
-		const adminRes = await app.request('/admin');
-		expect(adminRes.status).toBe(200);
-		expect(await adminRes.text()).toBe('Admin Dashboard');
-
-		// But other admin patterns still blocked
-		const phpmyadminRes = await app.request('/phpmyadmin');
-		expect(phpmyadminRes.status).toBe(410);
-	});
-
-	it('blocks config file attempts at root', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
-		app.get('*', (c) => c.text('OK'));
-
-		// Should block root-level config files
-		expect((await app.request('/config.json')).status).toBe(410);
-		expect((await app.request('/settings.yml')).status).toBe(410);
-		expect((await app.request('/secrets.env')).status).toBe(410);
-		expect((await app.request('/appsettings.json')).status).toBe(410);
-
-		// But allow config in API routes
-		const apiConfig = await app.request('/api/config.json');
-		expect(apiConfig.status).toBe(200);
-	});
-
-	it('blocks backup file extensions', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
-		app.get('*', (c) => c.text('OK'));
-
-		// Should block backup file extensions anywhere
-		expect((await app.request('/index.php.bak')).status).toBe(410);
-		expect((await app.request('/database.sql.old')).status).toBe(410);
-		expect((await app.request('/config.backup')).status).toBe(410);
-		expect((await app.request('/app.js.orig')).status).toBe(410);
-		expect((await app.request('/file.swp')).status).toBe(410);
-	});
-
-	it('blocks environment and server info routes', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
-		app.get('*', (c) => c.text('OK'));
-
-		// Environment files
-		expect((await app.request('/env.js')).status).toBe(410);
-		expect((await app.request('/_env')).status).toBe(410);
-		expect((await app.request('/config/secrets.env')).status).toBe(410);
-
-		// Server info routes
-		expect((await app.request('/server-status')).status).toBe(410);
-		expect((await app.request('/server-info')).status).toBe(410);
-		expect((await app.request('/info')).status).toBe(410);
-	});
-
-	it('blocks Swagger/OpenAPI config files', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
-		app.get('*', (c) => c.text('OK'));
-
-		// Should block root and /api swagger files
-		expect((await app.request('/swagger.json')).status).toBe(410);
-		expect((await app.request('/swagger.yml')).status).toBe(410);
-		expect((await app.request('/api/swagger.json')).status).toBe(410);
-
-		// But allow swagger UI routes
-		const swaggerUI = await app.request('/api/docs/swagger');
-		expect(swaggerUI.status).toBe(200);
-	});
-
-	it('blocks WordPress internals anywhere in path', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
-		app.get('*', (c) => c.text('OK'));
-
-		// WordPress internals should be blocked even in nested paths
-		expect((await app.request('/wp-includes/js/jquery.js')).status).toBe(410);
-		expect((await app.request('/wp-content/uploads/image.png')).status).toBe(410);
-		expect((await app.request('/foo/wp-admin/index.php')).status).toBe(410);
-		expect((await app.request('/wlwmanifest.xml')).status).toBe(410);
-	});
-
 	it('allows /login, /signup, /dashboard (legitimate user paths)', async () => {
 		const app = new Hono();
 		app.use('*', honeypot({ log: false }));
@@ -199,10 +62,95 @@ describe('honeypot middleware', () => {
 		expect((await app.request('/dashboard')).status).toBe(200);
 	});
 
-	it('blocks Next.js/Nuxt/Vercel framework probes', async () => {
+	it('supports custom patterns', async () => {
+		const app = makeApp({ patterns: [/^\/secret/i] });
+		expect((await app.request('/secret')).status).toBe(410);
+	});
+
+	it('supports custom status codes', async () => {
+		const app = makeApp({ status: 403 });
+		expect((await app.request('/wp-admin')).status).toBe(403);
+	});
+
+	it('blocks year folders', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/2017')).status).toBe(410);
+		expect((await app.request('/2024')).status).toBe(410);
+
+		// Should NOT block non-year patterns
+		expect((await app.request('/abcd')).status).toBe(200);
+		expect((await app.request('/12345')).status).toBe(200);
+	});
+
+	it('allows excluding built-in patterns', async () => {
 		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
+		app.use('*', honeypot({ exclude: [/^\/admin(\.php)?$/i], log: false }));
+		app.get('/admin', (c) => c.text('Admin Dashboard'));
 		app.get('*', (c) => c.text('OK'));
+
+		expect((await app.request('/admin')).status).toBe(200);
+		expect(await (await app.request('/admin')).text()).toBe('Admin Dashboard');
+
+		// Other admin patterns still blocked
+		expect((await app.request('/phpmyadmin')).status).toBe(410);
+	});
+
+	it('blocks config file attempts at root', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/config.json')).status).toBe(410);
+		expect((await app.request('/settings.yml')).status).toBe(410);
+		expect((await app.request('/secrets.env')).status).toBe(410);
+		expect((await app.request('/appsettings.json')).status).toBe(410);
+
+		// But allow config in API routes
+		expect((await app.request('/api/config.json')).status).toBe(200);
+	});
+
+	it('blocks backup file extensions', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/index.php.bak')).status).toBe(410);
+		expect((await app.request('/database.sql.old')).status).toBe(410);
+		expect((await app.request('/config.backup')).status).toBe(410);
+		expect((await app.request('/app.js.orig')).status).toBe(410);
+		expect((await app.request('/file.swp')).status).toBe(410);
+	});
+
+	it('blocks environment and server info routes', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/env.js')).status).toBe(410);
+		expect((await app.request('/_env')).status).toBe(410);
+		expect((await app.request('/config/secrets.env')).status).toBe(410);
+		expect((await app.request('/server-status')).status).toBe(410);
+		expect((await app.request('/server-info')).status).toBe(410);
+		expect((await app.request('/info')).status).toBe(410);
+	});
+
+	it('blocks Swagger/OpenAPI config files', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/swagger.json')).status).toBe(410);
+		expect((await app.request('/swagger.yml')).status).toBe(410);
+		expect((await app.request('/api/swagger.json')).status).toBe(410);
+
+		// But allow swagger UI routes
+		expect((await app.request('/api/docs/swagger')).status).toBe(200);
+	});
+
+	it('blocks WordPress internals anywhere in path', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/wp-includes/js/jquery.js')).status).toBe(410);
+		expect((await app.request('/wp-content/uploads/image.png')).status).toBe(410);
+		expect((await app.request('/foo/wp-admin/index.php')).status).toBe(410);
+		expect((await app.request('/wlwmanifest.xml')).status).toBe(410);
+	});
+
+	it('blocks Next.js/Nuxt/Vercel framework probes', async () => {
+		const app = makeApp();
 
 		expect((await app.request('/_next/webpack-hmr')).status).toBe(410);
 		expect((await app.request('/_rsc')).status).toBe(410);
@@ -214,9 +162,7 @@ describe('honeypot middleware', () => {
 	});
 
 	it('blocks deployment config probes', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
-		app.get('*', (c) => c.text('OK'));
+		const app = makeApp();
 
 		expect((await app.request('/var/task/serverless.yml')).status).toBe(410);
 		expect((await app.request('/vercel.json')).status).toBe(410);
@@ -227,9 +173,7 @@ describe('honeypot middleware', () => {
 	});
 
 	it('blocks Docker config probes', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
-		app.get('*', (c) => c.text('OK'));
+		const app = makeApp();
 
 		expect((await app.request('/docker-compose.yml')).status).toBe(410);
 		expect((await app.request('/Dockerfile')).status).toBe(410);
@@ -237,9 +181,7 @@ describe('honeypot middleware', () => {
 	});
 
 	it('blocks AWS credential probes', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
-		app.get('*', (c) => c.text('OK'));
+		const app = makeApp();
 
 		expect((await app.request('/aws/bucket')).status).toBe(410);
 		expect((await app.request('/aws/s3/credentials')).status).toBe(410);
@@ -247,9 +189,7 @@ describe('honeypot middleware', () => {
 	});
 
 	it('blocks system path traversal probes', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
-		app.get('*', (c) => c.text('OK'));
+		const app = makeApp();
 
 		expect((await app.request('/var/task/next.config.js')).status).toBe(410);
 		expect((await app.request('/var/log/apache2/access.log')).status).toBe(410);
@@ -257,17 +197,12 @@ describe('honeypot middleware', () => {
 	});
 
 	it('blocks command injection via URL path', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
-		app.get('*', (c) => c.text('OK'));
-
+		const app = makeApp();
 		expect((await app.request('/$(pwd)/serverless.yml')).status).toBe(410);
 	});
 
 	it('blocks log file and error_log probes', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
-		app.get('*', (c) => c.text('OK'));
+		const app = makeApp();
 
 		expect((await app.request('/log/production.log')).status).toBe(410);
 		expect((await app.request('/debug.log')).status).toBe(410);
@@ -275,9 +210,7 @@ describe('honeypot middleware', () => {
 	});
 
 	it('blocks Java/Tomcat/Solr probes', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
-		app.get('*', (c) => c.text('OK'));
+		const app = makeApp();
 
 		expect((await app.request('/WEB-INF/web.xml')).status).toBe(410);
 		expect((await app.request('/manager/html')).status).toBe(410);
@@ -285,48 +218,92 @@ describe('honeypot middleware', () => {
 	});
 
 	it('blocks mail server config probes', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
-		app.get('*', (c) => c.text('OK'));
-
+		const app = makeApp();
 		expect((await app.request('/opt/mailcow-dockerized/mailcow.conf')).status).toBe(410);
 	});
 
-	it('blocks env.js at root', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
-		app.get('*', (c) => c.text('OK'));
+	it('blocks version control directories (.svn, .hg)', async () => {
+		const app = makeApp();
 
-		// Should block root-level env.js (environment leak)
+		expect((await app.request('/.svn/entries')).status).toBe(410);
+		expect((await app.request('/.hg/store')).status).toBe(410);
+		expect((await app.request('/.git/config')).status).toBe(410);
+	});
+
+	it('blocks SSH/credential file probes', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/.ssh/id_rsa')).status).toBe(410);
+		expect((await app.request('/id_rsa')).status).toBe(410);
+		expect((await app.request('/id_ed25519')).status).toBe(410);
+		expect((await app.request('/.npmrc')).status).toBe(410);
+		expect((await app.request('/.aws/credentials')).status).toBe(410);
+	});
+
+	it('blocks OS metadata files', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/.DS_Store')).status).toBe(410);
+		expect((await app.request('/Thumbs.db')).status).toBe(410);
+	});
+
+	it('blocks Apache config files', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/.htaccess')).status).toBe(410);
+		expect((await app.request('/.htpasswd')).status).toBe(410);
+	});
+
+	it('blocks WYSIWYG editor exploit probes', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/ckeditor/upload')).status).toBe(410);
+		expect((await app.request('/tinymce/plugins')).status).toBe(410);
+		expect((await app.request('/elfinder/connector')).status).toBe(410);
+	});
+
+	it('blocks dependency manifest probes', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/composer.json')).status).toBe(410);
+		expect((await app.request('/composer.lock')).status).toBe(410);
+		expect((await app.request('/Gemfile')).status).toBe(410);
+		expect((await app.request('/requirements.txt')).status).toBe(410);
+	});
+
+	it('blocks Spring Boot actuator probes', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/actuator/health')).status).toBe(410);
+		expect((await app.request('/actuator/env')).status).toBe(410);
+	});
+
+	it('blocks .NET error log probes', async () => {
+		const app = makeApp();
+		expect((await app.request('/elmah.axd')).status).toBe(410);
+	});
+
+	it('blocks env.js at root but allows other JS files', async () => {
+		const app = makeApp();
+
 		expect((await app.request('/env.js')).status).toBe(410);
-
-		// But allow other JS files (not our business to block)
-		const mainJs = await app.request('/main.js');
-		expect(mainJs.status).toBe(200);
+		expect((await app.request('/main.js')).status).toBe(200);
 	});
 
 	it('normalizes double slashes to prevent bypass', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
-		app.get('*', (c) => c.text('OK'));
+		const app = makeApp();
 
-		// Double slash bypass attempts should still be blocked
 		expect((await app.request('///admin')).status).toBe(410);
 		expect((await app.request('/wp-admin//index.php')).status).toBe(410);
 		expect((await app.request('//wp-content/uploads')).status).toBe(410);
 	});
 
 	it('blocks shell backdoors and upload directory probes', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
-		app.get('*', (c) => c.text('OK'));
+		const app = makeApp();
 
-		// Shell backdoors
 		expect((await app.request('/ALFA_DATA')).status).toBe(410);
 		expect((await app.request('/c99.php')).status).toBe(410);
 		expect((await app.request('/shell.php')).status).toBe(410);
-
-		// Upload directories at root
 		expect((await app.request('/uploads')).status).toBe(410);
 		expect((await app.request('/upload')).status).toBe(410);
 		expect((await app.request('/images')).status).toBe(410);
@@ -339,11 +316,8 @@ describe('honeypot middleware', () => {
 	});
 
 	it('blocks admin subdirectory exploits', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
-		app.get('*', (c) => c.text('OK'));
+		const app = makeApp();
 
-		// Admin subdirectories anywhere in path
 		expect((await app.request('/admin/uploads')).status).toBe(410);
 		expect((await app.request('/admin/images')).status).toBe(410);
 		expect((await app.request('/admin/editor')).status).toBe(410);
@@ -352,30 +326,18 @@ describe('honeypot middleware', () => {
 	});
 
 	it('blocks CMS-specific exploit paths', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
-		app.get('*', (c) => c.text('OK'));
+		const app = makeApp();
 
-		// FCKeditor
 		expect((await app.request('/admin/fckeditor/editor/filemanager')).status).toBe(410);
-
-		// Drupal
 		expect((await app.request('/sites/default/files')).status).toBe(410);
-
-		// Joomla
 		expect((await app.request('/images/stories')).status).toBe(410);
 		expect((await app.request('/modules/mod_simplefileupload/elements')).status).toBe(410);
-
-		// OpenCart
 		expect((await app.request('/admin/controller/extension/extension')).status).toBe(410);
 	});
 
 	it('blocks generic CMS directory probes', async () => {
-		const app = new Hono();
-		app.use('*', honeypot({ log: false }));
-		app.get('*', (c) => c.text('OK'));
+		const app = makeApp();
 
-		// Generic directories at root
 		expect((await app.request('/modules')).status).toBe(410);
 		expect((await app.request('/plugins')).status).toBe(410);
 		expect((await app.request('/components')).status).toBe(410);
@@ -387,7 +349,276 @@ describe('honeypot middleware', () => {
 		expect((await app.request('/php')).status).toBe(410);
 		expect((await app.request('/public')).status).toBe(410);
 
-		// But allow nested legitimate paths
+		// But allow nested paths
 		expect((await app.request('/api/modules')).status).toBe(200);
+	});
+});
+
+// ─── MemoryStore Unit Tests ─────────────────────────────────────────────
+
+describe('MemoryStore', () => {
+	it('returns false for unknown IPs', () => {
+		const store = new MemoryStore();
+		expect(store.isBanned('1.2.3.4')).toBe(false);
+	});
+
+	it('increments and returns strike count', () => {
+		const store = new MemoryStore();
+		expect(store.addStrike('1.2.3.4')).toBe(1);
+		expect(store.addStrike('1.2.3.4')).toBe(2);
+		expect(store.addStrike('1.2.3.4')).toBe(3);
+	});
+
+	it('tracks strikes per IP independently', () => {
+		const store = new MemoryStore();
+		expect(store.addStrike('1.1.1.1')).toBe(1);
+		expect(store.addStrike('2.2.2.2')).toBe(1);
+		expect(store.addStrike('1.1.1.1')).toBe(2);
+		expect(store.addStrike('2.2.2.2')).toBe(2);
+	});
+
+	it('bans and detects banned IPs', () => {
+		const store = new MemoryStore();
+		store.ban('1.2.3.4');
+		expect(store.isBanned('1.2.3.4')).toBe(true);
+		expect(store.isBanned('5.6.7.8')).toBe(false);
+	});
+
+	it('resets strikes for an IP', () => {
+		const store = new MemoryStore();
+		store.addStrike('1.2.3.4');
+		store.addStrike('1.2.3.4');
+		store.resetStrikes('1.2.3.4');
+		expect(store.addStrike('1.2.3.4')).toBe(1);
+	});
+
+	it('expires bans after banTTL', () => {
+		const store = new MemoryStore({ banTTL: 1 }); // 1 second
+		store.ban('1.2.3.4');
+		expect(store.isBanned('1.2.3.4')).toBe(true);
+
+		// Fast-forward time
+		vi.useFakeTimers();
+		vi.advanceTimersByTime(1500);
+		expect(store.isBanned('1.2.3.4')).toBe(false);
+		vi.useRealTimers();
+	});
+
+	it('expires strikes after strikeTTL', () => {
+		const store = new MemoryStore({ strikeTTL: 1 }); // 1 second
+		store.addStrike('1.2.3.4');
+		store.addStrike('1.2.3.4');
+		expect(store.addStrike('1.2.3.4')).toBe(3);
+
+		// Fast-forward time
+		vi.useFakeTimers();
+		vi.advanceTimersByTime(1500);
+		expect(store.addStrike('1.2.3.4')).toBe(1); // Reset
+		vi.useRealTimers();
+	});
+});
+
+// ─── Store Integration Tests ────────────────────────────────────────────
+
+describe('honeypot with store', () => {
+	it('increments strikes on pattern match', async () => {
+		const store = new MemoryStore();
+		const app = makeApp({ store });
+
+		await app.request('/wp-admin');
+		expect(store.addStrike('test')).toBe(1); // store is clean for other IPs
+	});
+
+	it('bans IP after reaching strike threshold', async () => {
+		const store = new MemoryStore();
+		const app = new Hono();
+		app.use('*', honeypot({
+			log: false,
+			store,
+			strikeThreshold: 2,
+			getIP: () => '10.0.0.1',
+		}));
+		app.get('*', (c) => c.text('OK'));
+
+		// Strike 1
+		expect((await app.request('/wp-admin')).status).toBe(410);
+		// Strike 2 - triggers ban
+		expect((await app.request('/phpmyadmin')).status).toBe(410);
+
+		// Now banned - clean path should also be blocked
+		expect((await app.request('/api/data')).status).toBe(410);
+	});
+
+	it('banned IP is blocked on ALL paths (fast path)', async () => {
+		const store = new MemoryStore();
+		const app = new Hono();
+		app.use('*', honeypot({
+			log: false,
+			store,
+			strikeThreshold: 1, // ban on first offense
+			getIP: () => '10.0.0.1',
+		}));
+		app.get('*', (c) => c.text('OK'));
+
+		// First request triggers ban
+		await app.request('/wp-admin');
+
+		// Clean paths are now blocked
+		expect((await app.request('/')).status).toBe(410);
+		expect((await app.request('/api/v2/astrology')).status).toBe(410);
+		expect((await app.request('/products')).status).toBe(410);
+	});
+
+	it('does not track unknown IPs', async () => {
+		const store = new MemoryStore();
+		const app = new Hono();
+		app.use('*', honeypot({
+			log: false,
+			store,
+			strikeThreshold: 1,
+			getIP: () => 'unknown',
+		}));
+		app.get('*', (c) => c.text('OK'));
+
+		// Pattern match but unknown IP - should not ban
+		await app.request('/wp-admin');
+		await app.request('/phpmyadmin');
+
+		// Clean paths should still work
+		expect((await app.request('/api/data')).status).toBe(200);
+	});
+
+	it('uses default strikeThreshold of 3', async () => {
+		const store = new MemoryStore();
+		const app = new Hono();
+		app.use('*', honeypot({
+			log: false,
+			store,
+			getIP: () => '10.0.0.1',
+		}));
+		app.get('*', (c) => c.text('OK'));
+
+		await app.request('/wp-admin');
+		await app.request('/phpmyadmin');
+
+		// Not banned yet (only 2 strikes)
+		expect((await app.request('/api/data')).status).toBe(200);
+
+		// 3rd strike triggers ban
+		await app.request('/.env');
+		expect((await app.request('/api/data')).status).toBe(410);
+	});
+
+	it('supports custom getIP function', async () => {
+		const store = new MemoryStore();
+		const app = new Hono();
+		app.use('*', honeypot({
+			log: false,
+			store,
+			strikeThreshold: 1,
+			getIP: (c) => c.req.header('x-custom-ip') || 'unknown',
+		}));
+		app.get('*', (c) => c.text('OK'));
+
+		// Request with custom IP header
+		await app.request('/wp-admin', { headers: { 'x-custom-ip': '10.0.0.1' } });
+
+		// Banned via custom IP
+		expect((await app.request('/', { headers: { 'x-custom-ip': '10.0.0.1' } })).status).toBe(410);
+
+		// Different IP not banned
+		expect((await app.request('/', { headers: { 'x-custom-ip': '10.0.0.2' } })).status).toBe(200);
+	});
+});
+
+// ─── onBlocked Callback Tests ───────────────────────────────────────────
+
+describe('onBlocked callback', () => {
+	it('fires with pattern reason on match', async () => {
+		const blocked: BlockInfo[] = [];
+		const app = new Hono();
+		app.use('*', honeypot({
+			log: false,
+			getIP: () => '10.0.0.1',
+			onBlocked: (info) => { blocked.push(info); },
+		}));
+		app.get('*', (c) => c.text('OK'));
+
+		await app.request('/wp-admin');
+
+		expect(blocked).toHaveLength(1);
+		expect(blocked[0].reason).toBe('pattern');
+		expect(blocked[0].ip).toBe('10.0.0.1');
+		expect(blocked[0].path).toBe('/wp-admin');
+		expect(blocked[0].method).toBe('GET');
+	});
+
+	it('fires with banned reason for banned IPs', async () => {
+		const blocked: BlockInfo[] = [];
+		const store = new MemoryStore();
+		const app = new Hono();
+		app.use('*', honeypot({
+			log: false,
+			store,
+			strikeThreshold: 1,
+			getIP: () => '10.0.0.1',
+			onBlocked: (info) => { blocked.push(info); },
+		}));
+		app.get('*', (c) => c.text('OK'));
+
+		// First request: pattern match, triggers ban
+		await app.request('/wp-admin');
+		expect(blocked[0].reason).toBe('pattern');
+		expect(blocked[0].banned).toBe(true);
+
+		// Second request: banned fast path
+		await app.request('/clean-path');
+		expect(blocked[1].reason).toBe('banned');
+	});
+
+	it('includes strike count when store is active', async () => {
+		const blocked: BlockInfo[] = [];
+		const store = new MemoryStore();
+		const app = new Hono();
+		app.use('*', honeypot({
+			log: false,
+			store,
+			strikeThreshold: 3,
+			getIP: () => '10.0.0.1',
+			onBlocked: (info) => { blocked.push(info); },
+		}));
+		app.get('*', (c) => c.text('OK'));
+
+		await app.request('/wp-admin');
+		await app.request('/phpmyadmin');
+		await app.request('/.env');
+
+		expect(blocked[0].strikes).toBe(1);
+		expect(blocked[0].banned).toBe(false);
+		expect(blocked[1].strikes).toBe(2);
+		expect(blocked[1].banned).toBe(false);
+		expect(blocked[2].strikes).toBe(3);
+		expect(blocked[2].banned).toBe(true);
+	});
+});
+
+// ─── Backwards Compatibility ────────────────────────────────────────────
+
+describe('backwards compatibility', () => {
+	it('works without any options (stateless)', async () => {
+		const app = new Hono();
+		app.use('*', honeypot());
+		app.get('/', (c) => c.text('OK'));
+
+		// Pattern match still works
+		expect((await app.request('/wp-admin')).status).toBe(410);
+
+		// Clean path works
+		expect((await app.request('/')).status).toBe(200);
+	});
+
+	it('respects status option without store', async () => {
+		const app = makeApp({ status: 404 });
+		expect((await app.request('/wp-admin')).status).toBe(404);
 	});
 });
