@@ -20,7 +20,7 @@ const app = new Hono()
 app.use('*', honeypot())
 ```
 
-That's it. 150+ attack patterns are blocked out of the box. Every option below is **optional**.
+That's it. 200+ attack patterns are blocked out of the box. Every option below is **optional**.
 
 ---
 
@@ -49,7 +49,7 @@ app.use('*', honeypot({
 
 ### Pattern Matching (stateless, zero-config)
 
-Out of the box, the middleware matches request paths against 150+ regex patterns covering:
+Out of the box, the middleware matches request paths against 200+ regex patterns covering:
 
 | Category | Examples |
 |----------|----------|
@@ -71,7 +71,19 @@ Out of the box, the middleware matches request paths against 150+ regex patterns
 | WYSIWYG editors | `/ckeditor`, `/tinymce`, `/elfinder` |
 | OS metadata | `.DS_Store`, `Thumbs.db` |
 | Backup files | `*.bak`, `*.old`, `*.backup`, `*.swp` |
-| Brute force discovery | `/old`, `/test`, `/demo`, `/2017`, `/2024` |
+| Path traversal / LFI | `../`, `..%2f`, `/etc/passwd`, `/proc/self/environ` |
+| Vite dev server exploits | `/@fs/`, `/@vite/`, `/@id/` (CVE-2025-30208) |
+| Laravel/Django debug | `/_ignition`, `/__debug__` |
+| SSRF / cloud metadata | `/proxy/`, `169.254.169.254`, `/latest/meta-data` |
+| IoT / router exploits | `/HNAP1/`, `/boaform/`, `/GponForm/`, `/setup.cgi` |
+| Microsoft Exchange/SharePoint | `/owa/`, `/aspnet_client/`, `/ecp/`, `/_layouts/`, `/_vti_bin/` |
+| Self-hosted apps | `/nextcloud/`, `/owncloud/`, `/WebInterface/` (CrushFTP) |
+| Collaboration/monitoring | `/geoserver/`, `/confluence/`, `/jira/`, `/grafana/`, `/kibana/`, `/prometheus/` |
+| CI/CD / DevOps | `/jenkins/`, `/portainer/`, `/gitea/`, `/gitlab/` |
+| Database admin aliases | `/adminer`, `/pma/`, `/myadmin/`, `/mysqladmin`, `/dbadmin` |
+| Webmail | `/roundcube/`, `/webmail/` |
+| Kubernetes / container | `/metrics`, `/healthz`, `/readyz`, `/livez`, `/.dockerenv` |
+| Brute force discovery | `/old`, `/test`, `/demo`, `/script`, `/2017`, `/2024` |
 
 Patterns use smart anchoring to prevent false positives:
 
@@ -314,6 +326,12 @@ import type { HoneypotOptions, HoneypotStore, BlockInfo } from 'hono-honeypot'
 ## Runtime Compatibility
 
 Tested on all Hono.js runtimes: Cloudflare Workers, Bun, Deno, Node.js (>=18), Vercel Edge Functions, Fastly Compute.
+
+## AI Agents
+
+This package ships `AGENTS.md` in the published npm bundle. AI coding agents (Claude Code, Cursor, GitHub Copilot, OpenAI Codex, Gemini CLI) that support `AGENTS.md` will read it automatically from `node_modules/hono-honeypot/AGENTS.md`.
+
+---
 
 ## Contributing
 

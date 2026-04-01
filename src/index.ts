@@ -253,7 +253,7 @@ export class MemoryStore implements HoneypotStore {
  */
 const ATTACK_PATTERNS = [
   // ─── PHP vulnerability scanners ───────────────────────────────────────
-  /\.php$/i,
+  /\.php/i,
   /\/config\.php/i,
   /\/phpinfo/i,
   /\/eval-stdin\.php/i,
@@ -353,6 +353,9 @@ const ATTACK_PATTERNS = [
   // ─── Backup files (.bak, .old, .backup, .orig, .save, .swp) ────────
   /\.(bak|old|backup|orig|save|swp)$/i,
 
+  // ─── Compressed archives ───────────────────────────────────────────
+  /\.(7z|tgz|tar\.gz|tar|bz2|war|jar)$/i,
+
   // ─── Config files at root (NOT /api/*/config.json) ──────────────────
   /^\/config\.(js|json|yml|yaml|xml|ini|conf)$/i,
   /^\/settings\.(js|json|yml|yaml|xml)$/i,
@@ -369,19 +372,25 @@ const ATTACK_PATTERNS = [
   /\.remote-sync\.json$/i,
   /ftp-deploy\.json$/i,
 
-  // ─── JS files at root that leak environment info ────────────────────
+  // ─── JS files at root that leak app structure ───────────────────────
   /^\/env\.js$/i,
+  /^\/main\.js$/i,
+  /^\/index\.js$/i,
+  /^\/app\.js$/i,
 
   // ─── Server info/status routes ──────────────────────────────────────
   /^\/server-(status|info)$/i,
   /^\/info$/i,
 
-  // ─── Swagger/OpenAPI at root (NOT /api/openapi.json) ────────────────
-  /^\/swagger\.(json|yml|yaml)$/i,
+  // ─── Swagger/OpenAPI probes (NOT /api/openapi.json or nested API docs) ─
+  /^\/swagger/i,
   /^\/api\/swagger\.(json|yml|yaml)$/i,
+  /^\/api-docs/i,
+  /^\/v\d+\/api-docs/i,
 
   // ─── Environment leak attempts ──────────────────────────────────────
   /^\/_env/i,
+  /^\/env$/i,
   /^\/config\//i,
 
   // ─── Backup patterns (anchored to root) ─────────────────────────────
@@ -412,12 +421,14 @@ const ATTACK_PATTERNS = [
   /^\/sito$/i,
   /^\/oldsite$/i,
   /^\/old-site$/i,
+  /^\/script$/i,
   /^\/\d{4}$/i,
 
   // ─── Command injection probes ───────────────────────────────────────
   /^\/getcmd$/i,
   /\$\(/,
   /`/,
+  /"/,
 
   // ─── JS framework fingerprinting (Next.js, Nuxt, React, Vercel) ────
   /^\/_next/i,
@@ -450,23 +461,102 @@ const ATTACK_PATTERNS = [
   /\/aws[_-]s3/i,
   /\/aws[_-]ses/i,
 
-  // ─── System path traversal probes ───────────────────────────────────
+  // ─── Path traversal / local file inclusion (LFI) ─────────────────────
+  /\.\.\//,
+  /\.\.%2f/i,
+  /\.\.%5c/i,
+  /^\/etc\//i,
+  /^\/proc\//i,
   /^\/var\//i,
   /^\/opt\//i,
+  /\/passwd$/i,
 
   // ─── Log file probes ───────────────────────────────────────────────
   /\.log$/i,
   /\/error_log$/i,
 
-  // ─── Java/Tomcat/Solr probes ────────────────────────────────────────
+  // ─── Vite / dev server exploits (CVE-2025-30208) ────────────────────
+  /^\/@fs\//i,
+  /^\/@vite\//i,
+  /^\/@id\//i,
+
+  // ─── Laravel/Django debug probes ───────────────────────────────────
+  /^\/_ignition/i,
+  /^\/__debug__/i,
+
+  // ─── Java/Tomcat/Solr/Spring Boot probes ───────────────────────────
   /\/WEB-INF/i,
   /^\/manager\/html/i,
   /^\/solr/i,
   /^\/actuator/i,
   /\/elmah\.axd$/i,
+  /^\/servlet\//i,
+  /bsh\.servlet/i,
+  /^\/struts\//i,
+  /^\/invoker\//i,
+  /\.action$/i,
 
-  // ─── Mail server config probes ──────────────────────────────────────
+  // ─── Mail server / webmail probes ──────────────────────────────────
   /\/mailcow/i,
+  /^\/roundcube\//i,
+  /^\/webmail\//i,
+
+  // ─── Database admin tool aliases ───────────────────────────────────
+  /^\/adminer/i,
+  /^\/pma\//i,
+  /^\/myadmin\//i,
+  /^\/mysqladmin/i,
+  /^\/dbadmin/i,
+
+  // ─── SSRF / cloud metadata probes ─────────────────────────────────
+  /^\/proxy\//i,
+  /169\.254\.169\.254/,
+  /^\/latest\/meta-data/i,
+
+  // ─── IoT / Router exploits (Mirai/Muhstik botnets) ────────────────
+  /^\/HNAP1\//i,
+  /^\/boaform\//i,
+  /^\/GponForm\//i,
+  /^\/setup\.cgi$/i,
+  /\.htm$/i,
+
+  // ─── Microsoft Exchange / SharePoint webshell paths ───────────────
+  /^\/owa\//i,
+  /^\/aspnet_client\//i,
+  /^\/autodiscover\//i,
+  /^\/ecp\//i,
+  /^\/_layouts\//i,
+  /^\/_vti_bin\//i,
+
+  // ─── File transfer / self-hosted app probes ───────────────────────
+  /^\/WebInterface\//i,
+  /^\/owncloud\//i,
+  /^\/nextcloud\//i,
+
+  // ─── Self-hosted collaboration / monitoring ───────────────────────
+  /^\/geoserver\//i,
+  /^\/geowebcache\//i,
+  /^\/confluence\//i,
+  /^\/jira\//i,
+  /^\/grafana\//i,
+  /^\/kibana\//i,
+  /^\/prometheus\//i,
+
+  // ─── CI/CD / DevOps tool probes ───────────────────────────────────
+  /^\/jenkins\//i,
+  /\/j_acegi_security_check/i,
+  /^\/portainer\//i,
+  /^\/gitea\//i,
+  /^\/gitlab\//i,
+
+  // ─── Infra / container / Kubernetes probes ────────────────────────
+  /^\/metrics$/i,
+  /^\/healthz$/i,
+  /^\/readyz$/i,
+  /^\/livez$/i,
+  /^\/console\//i,
+  /^\/debug\//i,
+  /^\/\.dockerenv$/i,
 ];
 
 // ─── Default IP Extraction ──────────────────────────────────────────────
@@ -486,7 +576,7 @@ function defaultGetIP(c: Context): string {
 /**
  * Create honeypot middleware to block bot attacks and vulnerability scanners
  *
- * Intercepts 150+ common attack patterns (WordPress, PHP, admin panels, framework probes, etc.)
+ * Intercepts 200+ common attack patterns (WordPress, PHP, admin panels, framework probes, etc.)
  * before they reach your route handlers. Returns 410 Gone by default for faster search engine
  * deindexing and bot deterrence.
  *

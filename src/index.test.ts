@@ -129,14 +129,19 @@ describe('honeypot middleware', () => {
 		expect((await app.request('/info')).status).toBe(410);
 	});
 
-	it('blocks Swagger/OpenAPI config files', async () => {
+	it('blocks Swagger/OpenAPI and API docs probes', async () => {
 		const app = makeApp();
 
 		expect((await app.request('/swagger.json')).status).toBe(410);
 		expect((await app.request('/swagger.yml')).status).toBe(410);
+		expect((await app.request('/swagger-ui')).status).toBe(410);
+		expect((await app.request('/swagger/v1/swagger.json')).status).toBe(410);
 		expect((await app.request('/api/swagger.json')).status).toBe(410);
+		expect((await app.request('/api-docs')).status).toBe(410);
+		expect((await app.request('/v2/api-docs')).status).toBe(410);
+		expect((await app.request('/v3/api-docs/swagger-config')).status).toBe(410);
 
-		// But allow swagger UI routes
+		// But allow nested docs paths
 		expect((await app.request('/api/docs/swagger')).status).toBe(200);
 	});
 
@@ -283,11 +288,16 @@ describe('honeypot middleware', () => {
 		expect((await app.request('/elmah.axd')).status).toBe(410);
 	});
 
-	it('blocks env.js at root but allows other JS files', async () => {
+	it('blocks JS files at root', async () => {
 		const app = makeApp();
 
 		expect((await app.request('/env.js')).status).toBe(410);
-		expect((await app.request('/main.js')).status).toBe(200);
+		expect((await app.request('/main.js')).status).toBe(410);
+		expect((await app.request('/index.js')).status).toBe(410);
+		expect((await app.request('/app.js')).status).toBe(410);
+
+		// But allow in nested paths
+		expect((await app.request('/api/main.js')).status).toBe(200);
 	});
 
 	it('normalizes double slashes to prevent bypass', async () => {
@@ -351,6 +361,155 @@ describe('honeypot middleware', () => {
 
 		// But allow nested paths
 		expect((await app.request('/api/modules')).status).toBe(200);
+	});
+
+	it('blocks compressed archive probes', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/backup.tar.gz')).status).toBe(410);
+		expect((await app.request('/dump.7z')).status).toBe(410);
+		expect((await app.request('/app.war')).status).toBe(410);
+		expect((await app.request('/deploy.jar')).status).toBe(410);
+		expect((await app.request('/site.tgz')).status).toBe(410);
+	});
+
+	it('blocks path traversal and LFI probes', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/../../../etc/passwd')).status).toBe(410);
+		expect((await app.request('/etc/shadow')).status).toBe(410);
+		expect((await app.request('/proc/self/environ')).status).toBe(410);
+		expect((await app.request('/some/path/passwd')).status).toBe(410);
+	});
+
+	it('blocks Vite dev server exploits', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/@fs/etc/passwd')).status).toBe(410);
+		expect((await app.request('/@vite/client')).status).toBe(410);
+		expect((await app.request('/@id/some-module')).status).toBe(410);
+	});
+
+	it('blocks Laravel/Django debug probes', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/_ignition/execute-solution')).status).toBe(410);
+		expect((await app.request('/__debug__/toolbar')).status).toBe(410);
+	});
+
+	it('blocks Java servlet and Struts exploit probes', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/servlet/BshServlet')).status).toBe(410);
+		expect((await app.request('/struts/action')).status).toBe(410);
+		expect((await app.request('/invoker/EJBInvokerServlet')).status).toBe(410);
+		expect((await app.request('/integration/saveGangster.action')).status).toBe(410);
+	});
+
+	it('blocks webmail probes', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/roundcube/')).status).toBe(410);
+		expect((await app.request('/webmail/')).status).toBe(410);
+	});
+
+	it('blocks database admin tool aliases', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/adminer')).status).toBe(410);
+		expect((await app.request('/pma/')).status).toBe(410);
+		expect((await app.request('/myadmin/')).status).toBe(410);
+		expect((await app.request('/mysqladmin')).status).toBe(410);
+		expect((await app.request('/dbadmin')).status).toBe(410);
+	});
+
+	it('blocks SSRF and cloud metadata probes', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/proxy/http://169.254.169.254')).status).toBe(410);
+		expect((await app.request('/latest/meta-data/')).status).toBe(410);
+	});
+
+	it('blocks IoT and router exploit probes', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/HNAP1/')).status).toBe(410);
+		expect((await app.request('/boaform/admin')).status).toBe(410);
+		expect((await app.request('/GponForm/diag')).status).toBe(410);
+		expect((await app.request('/setup.cgi')).status).toBe(410);
+		expect((await app.request('/hw-sys.htm')).status).toBe(410);
+	});
+
+	it('blocks Microsoft Exchange and SharePoint probes', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/owa/auth/logon.aspx')).status).toBe(410);
+		expect((await app.request('/aspnet_client/system_web')).status).toBe(410);
+		expect((await app.request('/autodiscover/autodiscover.xml')).status).toBe(410);
+		expect((await app.request('/ecp/default.aspx')).status).toBe(410);
+		expect((await app.request('/_layouts/15/start.aspx')).status).toBe(410);
+		expect((await app.request('/_vti_bin/shtml.dll')).status).toBe(410);
+	});
+
+	it('blocks file transfer and self-hosted app probes', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/WebInterface/login.html')).status).toBe(410);
+		expect((await app.request('/owncloud/status.php')).status).toBe(410);
+		expect((await app.request('/nextcloud/')).status).toBe(410);
+	});
+
+	it('blocks collaboration and monitoring tool probes', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/geoserver/web')).status).toBe(410);
+		expect((await app.request('/geowebcache/rest')).status).toBe(410);
+		expect((await app.request('/confluence/')).status).toBe(410);
+		expect((await app.request('/jira/')).status).toBe(410);
+		expect((await app.request('/grafana/api/health')).status).toBe(410);
+		expect((await app.request('/kibana/app')).status).toBe(410);
+		expect((await app.request('/prometheus/graph')).status).toBe(410);
+	});
+
+	it('blocks CI/CD and DevOps tool probes', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/jenkins/login')).status).toBe(410);
+		expect((await app.request('/j_acegi_security_check')).status).toBe(410);
+		expect((await app.request('/portainer/')).status).toBe(410);
+		expect((await app.request('/gitea/')).status).toBe(410);
+		expect((await app.request('/gitlab/')).status).toBe(410);
+	});
+
+	it('blocks Kubernetes and container probes', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/metrics')).status).toBe(410);
+		expect((await app.request('/healthz')).status).toBe(410);
+		expect((await app.request('/readyz')).status).toBe(410);
+		expect((await app.request('/livez')).status).toBe(410);
+		expect((await app.request('/console/')).status).toBe(410);
+		expect((await app.request('/debug/pprof')).status).toBe(410);
+		expect((await app.request('/.dockerenv')).status).toBe(410);
+
+		// But allow nested paths (your own /api/health, /api/metrics, etc.)
+		expect((await app.request('/api/health')).status).toBe(200);
+		expect((await app.request('/api/metrics')).status).toBe(200);
+		expect((await app.request('/api/debug')).status).toBe(200);
+	});
+
+	it('blocks environment and brute force discovery probes', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/env')).status).toBe(410);
+		expect((await app.request('/script')).status).toBe(410);
+	});
+
+	it('blocks PHP path-info style URLs', async () => {
+		const app = makeApp();
+
+		expect((await app.request('/index.php/admin/login')).status).toBe(410);
+		expect((await app.request('/app.php/api/users')).status).toBe(410);
 	});
 });
 
