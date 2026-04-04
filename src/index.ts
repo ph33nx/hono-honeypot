@@ -429,6 +429,9 @@ const ATTACK_PATTERNS = [
   /\$\(/,
   /`/,
   /"/,
+  /\{(curl|wget|bash|sh|nc|ncat|python|perl|ruby|php),/i, // Brace expansion injection ({curl,URL} bypasses WAFs)
+  /\.oast\.(site|fun|live|me|online|pro)/i, // OAST callback domains (Interactsh/Burp Collaborator exfiltration)
+  /(%00|\x00)/, // Null byte injection (encoded and decoded forms)
 
   // ─── JS framework fingerprinting (Next.js, Nuxt, React, Vercel) ────
   /^\/_next/i,

