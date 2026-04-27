@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, setSystemTime } from 'bun:test';
 import { Hono } from 'hono';
 import { honeypot, MemoryStore } from './index';
 import type { BlockInfo } from './index';
@@ -529,6 +529,75 @@ describe('honeypot middleware', () => {
 		expect((await app.request('/index.php/admin/login')).status).toBe(410);
 		expect((await app.request('/app.php/api/users')).status).toBe(410);
 	});
+
+	it('blocks Magento 2 REST API fingerprint probes', async () => {
+		const app = makeApp();
+
+		// /rest/V1/... and /rest/v1/... (case-insensitive)
+		expect((await app.request('/rest/V1/store/storeConfigs')).status).toBe(410);
+		expect((await app.request('/rest/v1/products')).status).toBe(410);
+		// Store-scope variants: /rest/<scope>/V1/...
+		expect((await app.request('/rest/default/V1/store/storeConfigs')).status).toBe(410);
+		expect((await app.request('/rest/all/V1/products')).status).toBe(410);
+		expect((await app.request('/rest/en_us/V1/categories')).status).toBe(410);
+		// Higher version numbers
+		expect((await app.request('/rest/V2/cart')).status).toBe(410);
+	});
+
+	it('blocks zero-width / invisible Unicode normalisation probes', async () => {
+		const app = makeApp();
+
+		// U+200B Zero-Width Space (the canonical scanner probe)
+		expect((await app.request('/%E2%80%8B')).status).toBe(410);
+		// U+200C ZWNJ, U+200D ZWJ
+		expect((await app.request('/%E2%80%8C')).status).toBe(410);
+		expect((await app.request('/%E2%80%8D')).status).toBe(410);
+		// U+200E LRM, U+200F RLM
+		expect((await app.request('/%E2%80%8E')).status).toBe(410);
+		// U+202A–U+202E directional overrides
+		expect((await app.request('/%E2%80%AA')).status).toBe(410);
+		expect((await app.request('/%E2%80%AE')).status).toBe(410);
+		// U+FEFF UTF-8 BOM
+		expect((await app.request('/%EF%BB%BF')).status).toBe(410);
+		// Mid-path embedding
+		expect((await app.request('/api%E2%80%8B/users')).status).toBe(410);
+	});
+
+	it('blocks NetApp StorageGRID ASUP fingerprint', async () => {
+		const app = makeApp();
+		expect((await app.request('/storfs-asup')).status).toBe(410);
+	});
+
+	it('blocks open-proxy discovery probes', async () => {
+		const app = makeApp();
+		expect((await app.request('/ip')).status).toBe(410);
+		expect((await app.request('/proxy.pac')).status).toBe(410);
+	});
+
+	it('blocks VMware vCenter and SSO probes', async () => {
+		const app = makeApp();
+		expect((await app.request('/sdk')).status).toBe(410);
+		expect((await app.request('/websso/SAML2/SSO')).status).toBe(410);
+	});
+
+	it('blocks broad CGI script probes (router exploits)', async () => {
+		const app = makeApp();
+		// Existing /setup.cgi still caught by broader pattern
+		expect((await app.request('/setup.cgi')).status).toBe(410);
+		// Other router CGI exploits now caught
+		expect((await app.request('/apply_sec.cgi')).status).toBe(410);
+		expect((await app.request('/tmUnblock.cgi')).status).toBe(410);
+		expect((await app.request('/some/path/foo.cgi')).status).toBe(410);
+	});
+
+	it('does NOT block /.well-known/security.txt (RFC 9116 standard)', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false }));
+		app.get('/.well-known/security.txt', (c) => c.text('Contact: security@example.com'));
+
+		const res = await app.request('/.well-known/security.txt');
+		expect(res.status).toBe(200);
+	});
 });
 
 // ─── MemoryStore Unit Tests ─────────────────────────────────────────────
@@ -574,11 +643,10 @@ describe('MemoryStore', () => {
 		store.ban('1.2.3.4');
 		expect(store.isBanned('1.2.3.4')).toBe(true);
 
-		// Fast-forward time
-		vi.useFakeTimers();
-		vi.advanceTimersByTime(1500);
+		// Fast-forward 1.5s past the ban TTL
+		setSystemTime(new Date(Date.now() + 1500));
 		expect(store.isBanned('1.2.3.4')).toBe(false);
-		vi.useRealTimers();
+		setSystemTime();
 	});
 
 	it('expires strikes after strikeTTL', () => {
@@ -587,11 +655,10 @@ describe('MemoryStore', () => {
 		store.addStrike('1.2.3.4');
 		expect(store.addStrike('1.2.3.4')).toBe(3);
 
-		// Fast-forward time
-		vi.useFakeTimers();
-		vi.advanceTimersByTime(1500);
+		// Fast-forward 1.5s past the strike TTL
+		setSystemTime(new Date(Date.now() + 1500));
 		expect(store.addStrike('1.2.3.4')).toBe(1); // Reset
-		vi.useRealTimers();
+		setSystemTime();
 	});
 });
 

@@ -325,6 +325,15 @@ const ATTACK_PATTERNS = [
   /^\/drupal/i,
   /^\/magento/i,
 
+  // ─── Magento 2 REST API fingerprint probes ────────────────────────────
+  // Scanners hit `/rest/V1/store/storeConfigs` (and store-scope variants
+  // `/rest/default/V1/...`, `/rest/all/V1/...`, `/rest/<store_code>/V1/...`)
+  // to fingerprint Magento installs and chain known CVEs. Without this
+  // entry the probe 404s with no strike, letting a scanner sweep forever.
+  // The `/i` flag matches both `/V1/` and `/v1/`. Optional non-capturing
+  // scope segment matches both `/rest/v1/...` and `/rest/<scope>/v1/...`.
+  /^\/rest\/(?:[a-z0-9_-]+\/)?v\d+(?:\/|$)/i,
+
   // ─── Version control directories ────────────────────────────────────
   /\/\.git/i,
   /\/\.svn/i,
@@ -333,7 +342,6 @@ const ATTACK_PATTERNS = [
   // ─── Config/sensitive files (anywhere in path) ──────────────────────
   /\/\.env/i,
   /\/\.sql$/i,
-  /\/\.well-known\/security\.txt/i,
   /\/(vendor|node_modules)\//i,
   /\/\.htaccess$/i,
   /\/\.htpasswd$/i,
@@ -433,6 +441,18 @@ const ATTACK_PATTERNS = [
   /\.oast\.(site|fun|live|me|online|pro)/i, // OAST callback domains (Interactsh/Burp Collaborator exfiltration)
   /(%00|\x00)/, // Null byte injection (encoded and decoded forms)
 
+  // ─── Zero-width / invisible Unicode normalisation probes ─────────────
+  // Scanners send paths like `/%E2%80%8B` (U+200B Zero-Width Space) to
+  // hunt URL-normalisation bugs in routers and CDNs. Hono decodes
+  // `c.req.path`, so these arrive as literal Unicode chars. The range
+  // covers ZWSP, ZWNJ, ZWJ, LRM, RLM, LRO, RLO, all spaces and dashes
+  // in U+2000–U+203F General Punctuation, plus the U+FEFF UTF-8 BOM.
+  // Real users never type these into a URL bar.
+  /[\u2000-\u203F\uFEFF]/u,
+
+  // ─── Appliance / storage / NAS exploit probes ──────────────────────
+  /^\/storfs-asup$/i, // NetApp StorageGRID ASUP endpoint fingerprint
+
   // ─── JS framework fingerprinting (Next.js, Nuxt, React, Vercel) ────
   /^\/_next/i,
   /^\/_rsc/i,
@@ -511,6 +531,10 @@ const ATTACK_PATTERNS = [
   /^\/mysqladmin/i,
   /^\/dbadmin/i,
 
+  // ─── Open-proxy discovery probes ─────────────────────────────────
+  /^\/ip$/i, // httpbin-style IP echo, fingerprints open forward proxies
+  /^\/proxy\.pac$/i, // WPAD proxy auto-config probe
+
   // ─── SSRF / cloud metadata probes ─────────────────────────────────
   /^\/proxy\//i,
   /169\.254\.169\.254/,
@@ -520,8 +544,12 @@ const ATTACK_PATTERNS = [
   /^\/HNAP1\//i,
   /^\/boaform\//i,
   /^\/GponForm\//i,
-  /^\/setup\.cgi$/i,
-  /\.htm$/i,
+  /\.cgi$/i, // CGI scripts (router exploits: /apply_sec.cgi Zyxel, /setup.cgi Netgear, /tmUnblock.cgi, etc.)
+  /\.htm$/i, // Router/legacy admin panels (e.g. /hw-sys.htm Huawei). Exclude if your app serves .htm files.
+
+  // ─── VMware / virtualization probes ───────────────────────────────
+  /^\/sdk$/i, // VMware vCenter SDK endpoint
+  /^\/websso\//i, // VMware SSO login
 
   // ─── Microsoft Exchange / SharePoint webshell paths ───────────────
   /^\/owa\//i,

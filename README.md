@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/ph33nx/hono-honeypot">
+    <img src="https://raw.githubusercontent.com/ph33nx/hono-honeypot/main/assets/hero.png" alt="hono-honeypot. Block bots before they reach your routes. Zero dependencies, MIT licensed." width="100%">
+  </a>
+</p>
+
 # hono-honeypot
 
 Production-grade security middleware for [Hono.js](https://hono.dev). Intercepts vulnerability scanners, bot crawlers, and brute-force probes before they reach your application logic.
@@ -49,6 +55,10 @@ app.use('*', honeypot({
 
 ### Pattern Matching (stateless, zero-config)
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/ph33nx/hono-honeypot/main/assets/patterns.png" alt="200+ attack patterns built in. wp-admin, .env, .git, /actuator, /@fs/. Smart anchoring, no false positives." width="100%">
+</p>
+
 Out of the box, the middleware matches request paths against 200+ regex patterns covering:
 
 | Category | Examples |
@@ -56,6 +66,7 @@ Out of the box, the middleware matches request paths against 200+ regex patterns
 | PHP/WordPress | `*.php`, `/wp-admin`, `/xmlrpc.php`, `/wp-content/` |
 | Admin panels | `/admin`, `/phpmyadmin`, `/cpanel`, `/cgi-bin` |
 | CMS frameworks | `/typo3`, `/joomla`, `/drupal`, `/magento` |
+| Magento REST API | `/rest/V1/store/storeConfigs` and store-scope variants |
 | JS framework fingerprinting | `/_next`, `/_rsc`, `/_vercel`, `next.config.js`, `nuxt.config.ts` |
 | Deployment configs | `serverless.yml`, `vercel.json`, `netlify.toml`, `package.json` |
 | Docker/container | `docker-compose.yml`, `Dockerfile`, `/docker/` |
@@ -65,6 +76,7 @@ Out of the box, the middleware matches request paths against 200+ regex patterns
 | SSH/auth tokens | `/.ssh/`, `/id_rsa`, `/.npmrc`, `/.pypirc` |
 | System path traversal | `/var/task/`, `/var/log/`, `/opt/` |
 | Command injection | `$(pwd)`, backtick injection |
+| URL normalisation probes | Zero-width Unicode (`U+200B`, `U+FEFF` BOM, U+200C–U+200F, U+202A–U+202E directional overrides) |
 | Log files | `*.log`, `error_log` |
 | Java/Spring Boot | `/WEB-INF`, `/manager/html`, `/solr`, `/actuator` |
 | Dependency manifests | `composer.json`, `Gemfile`, `requirements.txt` |
@@ -135,6 +147,10 @@ Why `410 Gone` is the default:
 ---
 
 ## IP Strike/Ban System
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/ph33nx/hono-honeypot/main/assets/strike-ban.png" alt="3 strikes, 24-hour ban. Memory, Redis, or Cloudflare KV. O(1) ban check before pattern matching." width="100%">
+</p>
 
 Without a store, the middleware is stateless: it blocks matching paths but imposes no penalty on repeat offenders. With a store, it tracks strikes per IP and bans IPs that exceed the threshold.
 

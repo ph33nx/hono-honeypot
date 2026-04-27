@@ -26,7 +26,7 @@
 	],
 	"scripts": {
 		"build": "tsup",
-		"test": "vitest run",
+		"test": "bun test",
 		"prepublishOnly": "bun run build && bun test"
 	},
 	"keywords": [
@@ -55,11 +55,10 @@
 		"hono": "^4.0.0"
 	},
 	"devDependencies": {
-		"@types/bun": "^1.3.5",
-		"hono": "^4.11.3",
+		"@types/bun": "^1.3.13",
+		"hono": "^4.12.15",
 		"tsup": "^8.5.1",
-		"typescript": "^5.9.3",
-		"vitest": "^4.0.16"
+		"typescript": "^6.0.3"
 	},
 	"engines": {
 		"node": ">=18"
