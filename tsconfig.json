@@ -4,7 +4,6 @@
 		"module": "ESNext",
 		"lib": ["ES2022"],
 		"types": ["bun"],
-		"ignoreDeprecations": "6.0",
 		"declaration": true,
 		"declarationMap": true,
 		"outDir": "./dist",
