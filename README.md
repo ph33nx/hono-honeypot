@@ -6,9 +6,35 @@
 
 # hono-honeypot
 
-Production-grade security middleware for [Hono.js](https://hono.dev). Intercepts vulnerability scanners, bot crawlers, and brute-force probes before they reach your application logic.
+Security middleware for [Hono.js](https://hono.dev). A mini WAF and honeypot path blocker that intercepts vulnerability scanners (nuclei, nikto, sqlmap, dirbuster, gobuster, wpscan), bot crawlers, and brute-force probes before they reach your route handlers.
 
 Built from analyzing hundreds of thousands of real-world malicious requests in production. Pattern matching runs in sub-millisecond time across all Hono runtimes: Cloudflare Workers, Bun, Deno, Node.js, Vercel Edge, and Fastly Compute.
+
+## What this is (and isn't)
+
+`hono-honeypot` is **path-based attack pattern blocking** for Hono.js. It rejects requests to known scanner targets (`/wp-admin`, `/.env`, `/.git/`, `/actuator`, `/@fs/`, etc.) before they reach your handlers, optionally banning repeat offenders by IP. Treat it as a mini web application firewall (WAF), scanner deflector, or bot blocker.
+
+| What it blocks | What it does NOT block |
+|---|---|
+| Vulnerability scanners: nuclei, nikto, sqlmap, dirbuster, gobuster, wpscan | Spam form submissions (use a hidden form-field trap for that) |
+| WordPress, PHP, cPanel, phpMyAdmin probes | Application-level rate limits (use a separate rate limiter) |
+| `.env`, `.git`, `.aws`, `.ssh` exfiltration attempts | DDoS and volumetric attacks (terminate at Cloudflare or upstream proxy) |
+| Vite dev server exploits (CVE-2025-30208) | OWASP Top 10 injection against your own routes (input validation belongs in handlers) |
+| Path traversal probes, SSRF cloud-metadata probes | Behavioral bot detection (use a fingerprint or device-intelligence service) |
+| 200+ baked-in patterns covering Spring Actuator, Magento REST, Exchange OWA, IoT routers, K8s probes, CI/CD admin panels, and more | Authentication or authorization (this runs before your auth middleware) |
+
+The name "honeypot" is figurative: when the IP store is enabled, scanners that probe the trap paths get stuck (struck and banned). It is **not** a form-field anti-spam honeypot.
+
+### OWASP alignment
+
+Reduces attack surface for [**OWASP Top 10 2025 A02 Security Misconfiguration**](https://owasp.org/Top10/2025/) (formerly A05:2021, ranked #2 in the 2025 edition). Specifically denies reconnaissance probes targeting:
+
+- **Sample / legacy applications** left on production with default admin accounts (OWASP A02 Scenario #1: WordPress, phpMyAdmin, Adminer, Magento, cPanel)
+- **Debug endpoints** insecure by default (Spring `/actuator`, Django `/__debug__`, Laravel `/_ignition`, Vite `/@fs/`)
+- **Unnecessary features** enabled in production (admin panels, dev-tooling routes, IoT vendor backdoors)
+- **Sensitive files** that should never be web-accessible (`.env`, `.git/`, `.aws/`, `.ssh/`, backup files, dependency manifests)
+
+This is one layer of defense in depth, not a configuration auditor. Pair with proper hardening, secret management, and removal of unused frameworks.
 
 ## Install
 

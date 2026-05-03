@@ -1,6 +1,13 @@
 # hono-honeypot
 
-Zero-dependency honeypot middleware for Hono.js. Blocks vulnerability scanners, bot crawlers, and brute-force probes before they reach your route handlers. Works on all Hono runtimes: Cloudflare Workers, Bun, Deno, Node.js, Vercel Edge, Fastly Compute.
+Security middleware for Hono.js. A mini WAF and honeypot path blocker that intercepts vulnerability scanners (nuclei, nikto, sqlmap, dirbuster, gobuster, wpscan), bot crawlers, and brute-force probes before they reach route handlers. Works on all Hono runtimes: Cloudflare Workers, Bun, Deno, Node.js, Vercel Edge, Fastly Compute.
+
+## What this is (and isn't)
+
+- **Is:** path-based attack pattern blocker. Rejects known scanner targets (`/wp-admin`, `/.env`, `/.git/`, `/actuator`, `/@fs/`) and bans repeat offenders by IP when a store is configured. Mini WAF, scanner deflector, bot blocker.
+- **Is not:** a form-field anti-spam honeypot. Not a rate limiter. Not DDoS protection. Not behavioral bot detection. Not auth/authz. Runs before your auth middleware.
+- **Name:** "honeypot" is figurative. Scanners probing the trap paths get banned when the store is enabled.
+- **OWASP:** reduces attack surface for OWASP Top 10 2025 **A02 Security Misconfiguration** (formerly A05:2021, ranked #2 in 2025) by denying reconnaissance probes for default admin paths, debug endpoints (Spring `/actuator`, Django `/__debug__`, Laravel `/_ignition`), sample/legacy apps with default credentials, and exfiltration of `.env` / `.git/` / `.aws/`. One layer of defense in depth, not a configuration auditor.
 
 > Read the full API reference in the README before configuring.
 
