@@ -445,6 +445,17 @@ The literal path `/admin` is blocked, but `/api/admin`, `/admin/settings`, etc. 
 **Is it a form-field / spam honeypot?**
 No. "Honeypot" here is figurative — it traps path scanners, not form bots. It is not a rate limiter, DDoS protection, or auth layer.
 
+## Roadmap
+
+Longer-term direction and the research behind it live in [`docs/live-ruleset-sync.md`](./docs/live-ruleset-sync.md) — the case for (and against) turning this into a live-updating WAF. Help wanted on:
+
+- [ ] **Opt-in live ruleset sync** — auto-fetch a maintained path feed on a schedule, cache it (memory/Redis/KV), fail safe to the bundled patterns. Ships as a separate `hono-honeypot/rules-sync` export so the core stays zero-dependency. ([design](./docs/live-ruleset-sync.md#architecture-when-built--opt-in-fail-safe))
+- [ ] **Supply-chain hardening for fetched rules** — trusted-URL allowlist, hash/signature verification, ReDoS sanitization, pattern caps. ([details](./docs/live-ruleset-sync.md#supply-chain-safety-must-non-negotiable))
+- [ ] **Coraza/OWASP CRS adapter** — once a real JS/edge WASM build exists, prefer a proper WAF engine over hand-syncing path lists.
+- [ ] **More real-traffic patterns** — high-signal, low-false-positive paths from production scanner traffic (not discovery wordlists).
+
+Have a fresh scanner path slipping through, or a false positive? Open an issue with the request line.
+
 ## Contributing
 
 Issues and PRs welcome at [github.com/ph33nx/hono-honeypot](https://github.com/ph33nx/hono-honeypot)
