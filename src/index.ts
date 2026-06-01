@@ -160,15 +160,19 @@ export interface HoneypotOptions {
 	 * Use for custom logging, webhooks, metrics, etc.
 	 * When provided, built-in console.log is suppressed.
 	 *
+	 * The Hono `Context` is passed as a second argument so handlers can read
+	 * request data or environment bindings (e.g. `c.env.ABUSEIPDB_API_KEY` on
+	 * Cloudflare Workers, where `process.env` is empty).
+	 *
 	 * @example
 	 * ```ts
-	 * onBlocked: (info) => {
+	 * onBlocked: (info, c) => {
 	 *   console.log(`[honeypot] ${info.reason}: ${info.ip} ${info.method} ${info.path}`);
 	 *   if (info.banned) analytics.track('ip_banned', { ip: info.ip });
 	 * }
 	 * ```
 	 */
-	onBlocked?: (info: BlockInfo) => void | Promise<void>;
+	onBlocked?: (info: BlockInfo, c: Context) => void | Promise<void>;
 }
 
 // ─── MemoryStore ────────────────────────────────────────────────────────
@@ -432,9 +436,11 @@ const ATTACK_PATTERNS = [
   /^\/script$/i,
   /^\/\d{4}$/i,
 
-  // ─── Command injection probes ───────────────────────────────────────
+  // ─── Command injection / SSTI probes ────────────────────────────────
   /^\/getcmd$/i,
   /\$\(/,
+  /\$\{/, // JS template literal / Spring SpEL / Log4Shell-style SSTI (`${...}`). Real paths never contain `${`.
+  /<%/, // ERB / JSP / ASP server-side template injection (`<%`, `<%=`, `<%!`). Hono decodes `%3C%25`, so this is reachable.
   /`/,
   /"/,
   /\{(curl|wget|bash|sh|nc|ncat|python|perl|ruby|php),/i, // Brace expansion injection ({curl,URL} bypasses WAFs)
@@ -548,7 +554,11 @@ const ATTACK_PATTERNS = [
   /\.htm$/i, // Router/legacy admin panels (e.g. /hw-sys.htm Huawei). Exclude if your app serves .htm files.
 
   // ─── VMware / virtualization probes ───────────────────────────────
-  /^\/sdk$/i, // VMware vCenter SDK endpoint
+  // Note: bare `/sdk` is intentionally NOT matched — it is a common legitimate
+  // route (SDK pages/endpoints) and caused real false positives. The vSphere
+  // HTML5 client lives under `/ui/h5-` (vSAN, vSphere, vROps), which has no
+  // overlap with typical app routes, so we anchor there instead of bare `/ui`.
+  /^\/ui\/h5-/i, // VMware vSphere HTML5 client (CVE-2021-21985, CVE-2021-22005)
   /^\/websso\//i, // VMware SSO login
 
   // ─── Microsoft Exchange / SharePoint webshell paths ───────────────
@@ -663,7 +673,7 @@ export const honeypot = (options: HoneypotOptions = {}) => {
 			if (await store.isBanned(ip)) {
 				const path = c.req.path.replace(/\/+/g, '/');
 				if (onBlocked) {
-					onBlocked({ ip, path, method: c.req.method, reason: 'banned' });
+					onBlocked({ ip, path, method: c.req.method, reason: 'banned' }, c);
 				} else if (shouldLog) {
 					console.log(`\u{1F6AB} Banned [${ip}] ${c.req.method} ${path}`);
 				}
@@ -675,7 +685,26 @@ export const honeypot = (options: HoneypotOptions = {}) => {
 		const rawPath = c.req.path;
 		const path = rawPath.replace(/\/+/g, '/');
 
-		if (patterns.some((pattern) => pattern.test(path))) {
+		// Hono decodes `c.req.path` with decodeURI semantics, which leaves reserved
+		// characters encoded (e.g. `%24` stays for `$`). Fully decode a second form
+		// so encoded injection probes (`%24%7B...%7D` → `${...}`) are reachable. Only
+		// re-scan when decoding actually changes the path — the common case (no `%`)
+		// pays nothing. Both forms are tested because some patterns target the encoded
+		// shape (e.g. `..%2f`) and others the decoded shape.
+		let decodedPath = path;
+		if (path.includes('%')) {
+			try {
+				decodedPath = decodeURIComponent(path);
+			} catch {
+				// Malformed escape sequence — keep the original (itself a probe signal).
+				decodedPath = path;
+			}
+		}
+
+		if (
+			patterns.some((pattern) => pattern.test(path)) ||
+			(decodedPath !== path && patterns.some((pattern) => pattern.test(decodedPath)))
+		) {
 			let strikes: number | undefined;
 			let banned = false;
 
@@ -690,7 +719,7 @@ export const honeypot = (options: HoneypotOptions = {}) => {
 			}
 
 			if (onBlocked) {
-				onBlocked({ ip, path, method: c.req.method, reason: 'pattern', strikes, banned });
+				onBlocked({ ip, path, method: c.req.method, reason: 'pattern', strikes, banned }, c);
 			} else if (shouldLog) {
 				const banMsg = banned ? ` \u{1F6AB} BANNED` : '';
 				console.log(`\u{1F36F} Blocked [${ip}] ${c.req.method} ${path}${banMsg}`);

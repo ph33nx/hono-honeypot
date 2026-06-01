@@ -6,7 +6,7 @@
 
 # hono-honeypot
 
-Security middleware for [Hono.js](https://hono.dev). A mini WAF and honeypot path blocker that intercepts vulnerability scanners (nuclei, nikto, sqlmap, dirbuster, gobuster, wpscan), bot crawlers, and brute-force probes before they reach your route handlers.
+Security middleware for [Hono.js](https://hono.dev). A mini WAF and honeypot path blocker that intercepts vulnerability scanners (nuclei, nikto, sqlmap, dirbuster, gobuster, wpscan), bot crawlers, and brute-force probes before they reach your route handlers. Optionally bans repeat offenders by IP and reports them to AbuseIPDB.
 
 Built from analyzing hundreds of thousands of real-world malicious requests in production. Pattern matching runs in sub-millisecond time across all Hono runtimes: Cloudflare Workers, Bun, Deno, Node.js, Vercel Edge, and Fastly Compute.
 
@@ -70,7 +70,7 @@ app.use('*', honeypot({
   store,             // HoneypotStore      — enables IP strike/ban system
   strikeThreshold,   // number             — strikes before ban (default: 3)
   getIP,             // (c: Context) => string — custom IP extraction
-  onBlocked,         // (info: BlockInfo) => void — custom block handler
+  onBlocked,         // (info: BlockInfo, c: Context) => void — custom block handler
   log,               // boolean            — console logging (default: true)
 }))
 ```
@@ -101,7 +101,8 @@ Out of the box, the middleware matches request paths against 200+ regex patterns
 | Sensitive files | `/.env`, `/.htaccess`, `/.htpasswd`, `*.sql` |
 | SSH/auth tokens | `/.ssh/`, `/id_rsa`, `/.npmrc`, `/.pypirc` |
 | System path traversal | `/var/task/`, `/var/log/`, `/opt/` |
-| Command injection | `$(pwd)`, backtick injection |
+| Command injection | `$(pwd)`, backtick injection, `{curl,…}` brace expansion |
+| Server-side template injection | `${...}` (SpEL / Log4Shell), `<%...%>` (ERB / JSP / ASP) — matched in both raw and percent-decoded form |
 | URL normalisation probes | Zero-width Unicode (`U+200B`, `U+FEFF` BOM, U+200C–U+200F, U+202A–U+202E directional overrides) |
 | Log files | `*.log`, `error_log` |
 | Java/Spring Boot | `/WEB-INF`, `/manager/html`, `/solr`, `/actuator` |
@@ -141,9 +142,12 @@ app.use('*', honeypot({
   patterns: [
     /^\/internal-api/i,
     /^\/debug/i,
+    /\.zip$/i,           // opt-in: block .zip downloads (not on by default — many apps serve legit .zip)
   ],
 }))
 ```
+
+> The built-in archive rule blocks `.7z`, `.tar(.gz)`, `.tgz`, `.bz2`, `.war`, and `.jar`, but **not `.zip`** — it is too commonly served legitimately (exports, bundles). Add `/\.zip$/i` if your app never serves zip downloads.
 
 ### Excluding Built-in Patterns
 
@@ -303,9 +307,11 @@ app.use('*', honeypot({
 
 Custom callback fired on every blocked request. When provided, suppresses built-in console logging.
 
+The handler receives the `BlockInfo` and the Hono `Context` (use `c` to read request data or env bindings such as `c.env.ABUSEIPDB_API_KEY` on Cloudflare Workers, where `process.env` is empty).
+
 ```typescript
 app.use('*', honeypot({
-  onBlocked: (info) => {
+  onBlocked: (info, c) => {
     // info.ip       — client IP
     // info.path     — normalized request path
     // info.method   — HTTP method
@@ -337,20 +343,64 @@ app.use('*', honeypot({ log: false }))
 
 ---
 
+## AbuseIPDB Reporting (optional)
+
+Contribute your scanner sightings back to [AbuseIPDB](https://www.abuseipdb.com/) so banned IPs build community reputation. It ships as a **separate subpath export** (`hono-honeypot/abuseipdb`) so the core middleware stays zero-dependency and vendor-neutral — import it only if you want it.
+
+```typescript
+import { honeypot, MemoryStore } from 'hono-honeypot'
+import { abuseIPDBReporter } from 'hono-honeypot/abuseipdb'
+
+app.use('*', honeypot({
+  store: new MemoryStore(),
+  onBlocked: abuseIPDBReporter(), // reports an IP when it crosses the ban threshold
+}))
+```
+
+**Why pass the key, not auto-read `process.env`?** On Cloudflare Workers — a primary target runtime — `process.env` is empty by default; bindings arrive on `c.env`. The reporter resolves the key in this order: an explicit `apiKey` → `c.env[envKey]` → `process.env[envKey]` (default env var `ABUSEIPDB_API_KEY`). With no key resolvable it is a silent no-op, so it is safe to wire up unconditionally.
+
+```typescript
+// Explicit / Cloudflare Workers binding:
+abuseIPDBReporter({ apiKey: (c) => c.env.ABUSEIPDB_API_KEY })
+// Node (reads process.env.ABUSEIPDB_API_KEY automatically):
+abuseIPDBReporter()
+```
+
+It **reports only when an IP is banned** (`info.banned`), keeping you well under AbuseIPDB's free-tier limits (1000 reports/day, 15-minute dedup per IP). It is fire-and-forget — never throws, never blocks the request, swallows rate-limit and network errors.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `apiKey` | `string \| (c) => string` | env | Key, or a resolver from context |
+| `envKey` | `string` | `'ABUSEIPDB_API_KEY'` | Env var name to resolve the key from |
+| `fetch` | `Fetcher` | `globalThis.fetch` | Injected fetcher (Workers binding / tests); any fetch-like fn |
+| `categories` | `string` | `'21,19'` | Report categories (Web App Attack, Bad Web Bot) |
+| `reportOn` | `(info) => boolean` | `info.banned` | When to report |
+| `comment` | `(info) => string` | probe line | Public report comment (sanitized, capped) |
+| `endpoint` | `string` | AbuseIPDB v2 | Report endpoint override |
+
+> Requires a store (so IPs can be banned). The comment is published publicly on AbuseIPDB — it carries only the attacker's own request line, sanitized to printable ASCII and capped, never your routes or infrastructure.
+
+---
+
 ## Exports
 
 ```typescript
 import { honeypot, MemoryStore } from 'hono-honeypot'
 import type { HoneypotOptions, HoneypotStore, BlockInfo } from 'hono-honeypot'
+import { abuseIPDBReporter } from 'hono-honeypot/abuseipdb'
+import type { AbuseIPDBOptions } from 'hono-honeypot/abuseipdb'
 ```
 
-| Export | Type | Description |
-|--------|------|-------------|
-| `honeypot` | function | Middleware factory |
-| `MemoryStore` | class | Built-in in-memory store |
-| `HoneypotOptions` | interface | Options type |
-| `HoneypotStore` | interface | Store adapter contract |
-| `BlockInfo` | interface | Block event payload |
+| Export | Path | Type | Description |
+|--------|------|------|-------------|
+| `honeypot` | `hono-honeypot` | function | Middleware factory |
+| `MemoryStore` | `hono-honeypot` | class | Built-in in-memory store |
+| `HoneypotOptions` | `hono-honeypot` | interface | Options type |
+| `HoneypotStore` | `hono-honeypot` | interface | Store adapter contract |
+| `BlockInfo` | `hono-honeypot` | interface | Block event payload |
+| `abuseIPDBReporter` | `hono-honeypot/abuseipdb` | function | AbuseIPDB `onBlocked` reporter factory |
+| `AbuseIPDBOptions` | `hono-honeypot/abuseipdb` | interface | Reporter options type |
+| `Fetcher` | `hono-honeypot/abuseipdb` | type | Injectable fetch-like signature |
 
 ---
 
@@ -374,6 +424,26 @@ Tested on all Hono.js runtimes: Cloudflare Workers, Bun, Deno, Node.js (>=18), V
 This package ships `AGENTS.md` in the published npm bundle. AI coding agents (Claude Code, Cursor, GitHub Copilot, OpenAI Codex, Gemini CLI) that support `AGENTS.md` will read it automatically from `node_modules/hono-honeypot/AGENTS.md`.
 
 ---
+
+## FAQ
+
+**How do I block vulnerability scanners in Hono?**
+Add `app.use('*', honeypot())`. It ships 200+ patterns that match the paths nuclei, nikto, sqlmap, dirbuster, gobuster, and wpscan probe for (`/wp-admin`, `/.env`, `/.git/`, `/actuator`, `/@fs/`, …) and returns `410 Gone` before the request reaches your handlers.
+
+**Does it work as a WAF on Cloudflare Workers without a paid plan?**
+Yes. It is a code-level mini WAF that runs in your Worker (and on Bun, Deno, Node.js, Vercel Edge, Fastly Compute) with zero dependencies — no Cloudflare WAF subscription needed. Read env bindings via `c.env`, not `process.env`.
+
+**How do I ban repeat attackers by IP?**
+Pass a `store` (`new MemoryStore()` for single-process, or a Redis/KV adapter for distributed). After `strikeThreshold` matches (default 3), the IP is banned and every later request gets an O(1) `410`.
+
+**How do I report attackers to AbuseIPDB from Hono?**
+Import `abuseIPDBReporter` from `hono-honeypot/abuseipdb` and pass it as `onBlocked`. It reports each IP once, when it is banned. See [AbuseIPDB Reporting](#abuseipdb-reporting-optional).
+
+**Will it block my own `/admin` route?**
+The literal path `/admin` is blocked, but `/api/admin`, `/admin/settings`, etc. are not (the pattern is root-anchored). If you serve a real panel at exactly `/admin`, exclude it: `honeypot({ exclude: [/^\/admin(\.php)?$/i] })`.
+
+**Is it a form-field / spam honeypot?**
+No. "Honeypot" here is figurative — it traps path scanners, not form bots. It is not a rate limiter, DDoS protection, or auth layer.
 
 ## Contributing
 

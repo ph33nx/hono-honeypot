@@ -1,0 +1,32 @@
+# Lefthook — local quality gates for hono-honeypot.
+#
+# Mirrors the main app's split: pre-commit runs fast checks, pre-push runs the
+# full validation. The suite here is tiny (tsc + ~97 bun tests, well under a
+# second), so tests run at BOTH stages — cheap insurance against the class of
+# bug that slipped through before (a test-only type error, invisible because
+# tsconfig excluded test files and there was no local gate).
+#
+# Hooks install automatically via the `prepare` script on `bun install`.
+# To install manually: `bunx lefthook install`.
+
+pre-commit:
+  parallel: true
+  commands:
+    typecheck:
+      run: bun run typecheck
+    test:
+      run: bun test
+
+pre-push:
+  parallel: false
+  commands:
+    typecheck:
+      run: bun run typecheck
+      priority: 1
+    test:
+      run: bun test
+      priority: 2
+    # Validates the published artifact: tsup ESM/CJS bundles + .d.ts generation.
+    build:
+      run: bun run build
+      priority: 3

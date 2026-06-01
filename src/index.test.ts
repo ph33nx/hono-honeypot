@@ -213,6 +213,15 @@ describe('honeypot middleware', () => {
 		expect((await app.request('/{bash,-c,id}')).status).toBe(410);
 	});
 
+	it('blocks server-side template injection probes', async () => {
+		const app = makeApp();
+		// ${...} — JS template literal / Spring SpEL / Log4Shell style
+		expect((await app.request('/js/${7*7}')).status).toBe(410);
+		expect((await app.request('/%24%7B7*7%7D')).status).toBe(410);
+		// <% ... %> — ERB / JSP / ASP (sent percent-encoded; Hono decodes to `<%25`)
+		expect((await app.request('/%3C%25=7*7%25%3E')).status).toBe(410);
+	});
+
 	it('blocks OAST callback exfiltration domains', async () => {
 		const app = makeApp();
 		expect((await app.request('/test.oast.site')).status).toBe(410);
@@ -574,10 +583,19 @@ describe('honeypot middleware', () => {
 		expect((await app.request('/proxy.pac')).status).toBe(410);
 	});
 
-	it('blocks VMware vCenter and SSO probes', async () => {
+	it('blocks VMware vSphere and SSO probes', async () => {
 		const app = makeApp();
-		expect((await app.request('/sdk')).status).toBe(410);
+		expect((await app.request('/ui/h5-vsan/rest')).status).toBe(410);
 		expect((await app.request('/websso/SAML2/SSO')).status).toBe(410);
+	});
+
+	it('allows legitimate /sdk and /ui routes (not VMware false positives)', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false }));
+		app.get('/sdk', (c) => c.text('OK'));
+		app.get('/ui', (c) => c.text('OK'));
+		expect((await app.request('/sdk')).status).toBe(200);
+		expect((await app.request('/ui')).status).toBe(200);
 	});
 
 	it('blocks broad CGI script probes (router exploits)', async () => {
@@ -843,6 +861,20 @@ describe('onBlocked callback', () => {
 		expect(blocked[1].banned).toBe(false);
 		expect(blocked[2].strikes).toBe(3);
 		expect(blocked[2].banned).toBe(true);
+	});
+
+	it('passes the Hono Context as the second argument', async () => {
+		let envSeen: unknown;
+		const app = new Hono();
+		app.use('*', honeypot({
+			log: false,
+			onBlocked: (_info, c) => { envSeen = c.env; },
+		}));
+		app.get('*', (c) => c.text('OK'));
+
+		await app.request('/wp-admin', {}, { ABUSEIPDB_API_KEY: 'k' });
+
+		expect(envSeen).toEqual({ ABUSEIPDB_API_KEY: 'k' });
 	});
 });
 

@@ -39,7 +39,7 @@ app.use('*', honeypot())
 | `store` | `HoneypotStore` | none | Enables IP strike/ban system |
 | `strikeThreshold` | `number` | `3` | Strikes before IP ban |
 | `getIP` | `(c: Context) => string` | proxy headers | Custom IP extraction |
-| `onBlocked` | `(info: BlockInfo) => void` | console.log | Custom block handler (suppresses built-in logging) |
+| `onBlocked` | `(info: BlockInfo, c: Context) => void` | console.log | Custom block handler, receives the Hono `Context` (suppresses built-in logging) |
 | `log` | `boolean` | `true` | Console logging (ignored when onBlocked is set) |
 
 ## Exports
@@ -47,6 +47,7 @@ app.use('*', honeypot())
 ```typescript
 import { honeypot, MemoryStore } from 'hono-honeypot'
 import type { HoneypotOptions, HoneypotStore, BlockInfo } from 'hono-honeypot'
+import { abuseIPDBReporter } from 'hono-honeypot/abuseipdb' // optional subpath
 ```
 
 | Export | Type | Description |
@@ -87,11 +88,28 @@ interface HoneypotStore {
 
 All methods may return sync values or Promises.
 
+## AbuseIPDB reporting (optional subpath export)
+
+Report banned IPs to AbuseIPDB. Separate entry point so the core stays zero-dependency. Reports only on ban (respects the free tier's 1000/day + 15-min-per-IP limits). Fire-and-forget: never throws, never blocks.
+
+```typescript
+import { honeypot, MemoryStore } from 'hono-honeypot'
+import { abuseIPDBReporter } from 'hono-honeypot/abuseipdb'
+
+app.use('*', honeypot({
+  store: new MemoryStore(),
+  onBlocked: abuseIPDBReporter(), // key from c.env.ABUSEIPDB_API_KEY, then process.env
+}))
+```
+
+The key is resolved from `c.env[envKey]` first (Workers/Bun/Deno bindings; `process.env` is empty on Workers), then `process.env[envKey]`. Override with `abuseIPDBReporter({ apiKey })` (string or `(c) => string`). Pass `fetch` to inject a fetcher. No key resolved → silent no-op.
+
 ## Pattern behavior
 
 - **Smart anchoring:** `^\/pattern$` = exact match, `^\/pattern` = starts with, no anchors = substring match
 - **Path normalization:** Double slashes collapsed before matching (`//admin` becomes `/admin`)
-- **200+ built-in patterns** covering: PHP, WordPress, shell/backdoors, admin panels, CMS frameworks, version control, sensitive files, SSH/credentials, backups, archives, config files, FTP/SFTP, JS framework fingerprinting, deployment configs, Docker/containers, AWS/cloud credentials, path traversal/LFI, Vite exploits, Laravel/Django debug, Java/Tomcat/Struts, webmail, database admin tools, SSRF/cloud metadata, IoT/router exploits, Microsoft Exchange/SharePoint, file transfer apps, self-hosted collaboration/monitoring tools, CI/CD/DevOps tools, Kubernetes probes
+- **200+ built-in patterns** covering: PHP, WordPress, shell/backdoors, admin panels, CMS frameworks, version control, sensitive files, SSH/credentials, backups, archives, config files, FTP/SFTP, JS framework fingerprinting, deployment configs, Docker/containers, AWS/cloud credentials, path traversal/LFI, command injection & server-side template injection (`${...}`, `<%...%>`), Vite exploits, Laravel/Django debug, Java/Tomcat/Struts, webmail, database admin tools, SSRF/cloud metadata, IoT/router exploits, Microsoft Exchange/SharePoint, file transfer apps, self-hosted collaboration/monitoring tools, CI/CD/DevOps tools, Kubernetes probes
+- **Encoded probes:** both the raw path and a fully percent-decoded form are matched, so `%24%7B...%7D` (`${...}`) is caught even though Hono leaves reserved chars encoded
 - Custom patterns are merged with built-in patterns
 - Exclude patterns by matching regex source string
 
@@ -105,7 +123,8 @@ All methods may return sync values or Promises.
 | Allow your own /admin route | `honeypot({ exclude: [/^\/admin(\.php)?$/i] })` |
 | Add custom patterns | `honeypot({ patterns: [/^\/internal/i] })` |
 | Custom IP extraction | `honeypot({ getIP: (c) => c.req.header('x-real-ip') \|\| 'unknown' })` |
-| Custom block handler | `honeypot({ onBlocked: (info) => logger.warn(info) })` |
+| Custom block handler | `honeypot({ onBlocked: (info, c) => logger.warn(info) })` |
+| Report bans to AbuseIPDB | `import { abuseIPDBReporter } from 'hono-honeypot/abuseipdb'` then `honeypot({ store, onBlocked: abuseIPDBReporter() })` |
 | Silence console output | `honeypot({ log: false })` |
 
 ## Gotchas
@@ -114,6 +133,6 @@ All methods may return sync values or Promises.
 - `/admin` is blocked by default. Use `exclude` to allow your own admin route
 - MemoryStore is per-isolate (per-process). Use Redis or KV for distributed deployments
 - IPs resolving to `'unknown'` are not tracked by the strike system (prevents false bans)
-- When `onBlocked` is provided, built-in console logging is suppressed regardless of `log` setting
+- When `onBlocked` is provided, built-in console logging is suppressed regardless of `log` setting. `onBlocked(info, c)` receives the Hono `Context` — read env bindings via `c.env`, not `process.env` (empty on Workers)
 - 410 Gone is the default status. Google and Bing prioritize 410 for faster deindexing than 404
 - Without a store, the middleware is stateless (pattern matching only, no strike tracking)
