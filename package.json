@@ -1,6 +1,6 @@
 {
 	"name": "hono-honeypot",
-	"version": "1.4.0",
+	"version": "1.5.0",
 	"description": "Hono security middleware: honeypot path blocker and mini WAF that stops vulnerability scanners (nuclei, nikto, sqlmap, dirbuster, wpscan), bad bots, and brute-force probes before they reach your routes. Optional IP strike/ban plus AbuseIPDB reporting. Zero dependencies. Cloudflare Workers, Bun, Deno, Node.js, Vercel Edge, Fastly Compute.",
 	"type": "module",
 	"main": "./dist/index.cjs",
