@@ -572,6 +572,29 @@ describe('honeypot middleware', () => {
 		expect((await app.request('/api%E2%80%8B/users')).status).toBe(410);
 	});
 
+	/**
+	 * Regression: the invisible-character class used to be the whole U+2000-U+203F General
+	 * Punctuation block, which also holds punctuation real visitors send. In production that wide
+	 * class blocked a mobile visitor on a live search path, and because a pattern match also earns
+	 * a strike, three brushes with it would have banned them from every path on the site. Each
+	 * character below is VISIBLE and must reach the route.
+	 */
+	it('does not block visible punctuation that real visitors send', async () => {
+		const app = makeApp();
+
+		// U+2006 SIX-PER-EM SPACE: iOS pinyin IMEs insert it between syllables.
+		expect((await app.request('/search/%E2%80%86term')).status).toBe(200);
+		// U+2013 EN DASH and U+2014 EM DASH: ordinary slug punctuation.
+		expect((await app.request('/blog/2020%E2%80%932021-review')).status).toBe(200);
+		expect((await app.request('/blog/a%E2%80%94b')).status).toBe(200);
+		// U+2018 / U+2019 curly quotes: what a phone keyboard produces for an apostrophe.
+		expect((await app.request('/blog/it%E2%80%99s-fine')).status).toBe(200);
+		// U+2026 HORIZONTAL ELLIPSIS.
+		expect((await app.request('/blog/more%E2%80%A6')).status).toBe(200);
+		// U+202F NARROW NO-BREAK SPACE: French and Mongolian typography.
+		expect((await app.request('/fr/prix%E2%80%AF10')).status).toBe(200);
+	});
+
 	it('blocks NetApp StorageGRID ASUP fingerprint', async () => {
 		const app = makeApp();
 		expect((await app.request('/storfs-asup')).status).toBe(410);
@@ -727,8 +750,50 @@ describe('honeypot with store', () => {
 
 		// Clean paths are now blocked
 		expect((await app.request('/')).status).toBe(410);
-		expect((await app.request('/api/v2/astrology')).status).toBe(410);
+		expect((await app.request('/api/v1/users')).status).toBe(410);
 		expect((await app.request('/products')).status).toBe(410);
+	});
+
+	/**
+	 * A blocked response describes the CALLER, never the resource, but a CDN cache key contains no
+	 * caller component. Without `no-store` a banned visitor requesting one of your real pages lets
+	 * the edge store "gone" under that URL and serve it to everyone else, and the default 410 is
+	 * the status search engines act on fastest. Measured in production behind Cloudflare as
+	 * `cf-cache-status: HIT` with `age: 123` on a live page. Both branches are asserted: the ban
+	 * branch fires on urls that DO exist, and the pattern branch can too via a custom pattern.
+	 */
+	it('ban response is uncacheable, on a path that really exists', async () => {
+		const store = new MemoryStore();
+		const app = new Hono();
+		app.use('*', honeypot({ log: false, store, strikeThreshold: 1, getIP: () => '10.0.0.9' }));
+		app.get('*', (c) => c.text('OK'));
+
+		await app.request('/wp-admin'); // earns the ban
+
+		const res = await app.request('/products');
+		expect(res.status).toBe(410);
+		expect(res.headers.get('cdn-cache-control')).toBe('no-store');
+		expect(res.headers.get('cache-control')).toBe('no-store');
+	});
+
+	it('pattern-match response is uncacheable too', async () => {
+		const app = makeApp();
+
+		const res = await app.request('/wp-login.php');
+		expect(res.status).toBe(410);
+		expect(res.headers.get('cdn-cache-control')).toBe('no-store');
+		expect(res.headers.get('cache-control')).toBe('no-store');
+	});
+
+	it('stays uncacheable when the status is overridden', async () => {
+		const app = new Hono();
+		app.use('*', honeypot({ log: false, status: 404 }));
+		app.get('*', (c) => c.text('OK'));
+
+		const res = await app.request('/wp-login.php');
+		expect(res.status).toBe(404);
+		expect(res.headers.get('cdn-cache-control')).toBe('no-store');
+		expect(res.headers.get('cache-control')).toBe('no-store');
 	});
 
 	it('does not track unknown IPs', async () => {

@@ -90,9 +90,9 @@
 		"hono": "^4.0.0"
 	},
 	"devDependencies": {
-		"@types/bun": "^1.3.13",
-		"hono": "^4.12.15",
-		"lefthook": "^2.1.9",
+		"@types/bun": "^1.3.14",
+		"hono": "^4.12.32",
+		"lefthook": "^2.1.10",
 		"tsup": "^8.5.1",
 		"typescript": "^5.9.3"
 	},

@@ -174,6 +174,26 @@ Why `410 Gone` is the default:
 - Scanners with retry logic treat `410` as permanent and stop faster than `404`
 - Empty response body minimizes bandwidth under high-volume probing
 
+#### Blocked responses are always uncacheable
+
+Every blocked response ships `Cache-Control: no-store` and `CDN-Cache-Control: no-store`, whichever
+status you choose. This is not configurable, and the reason matters if you run behind a CDN.
+
+**A blocked response is a statement about the caller, not about the URL.** A CDN cache key contains
+no caller component, so a cached block gets replayed to everyone. The ban path makes that concrete:
+a banned visitor is blocked on **every** path, including your real pages, so one banned IP
+requesting your pricing page could have the edge store "gone" under that URL and serve it to the
+next visitor. Cloudflare caches `404` and `410` for about 3 minutes by default, and `410` is the
+status search engines act on fastest, so the cached entry is a deindexing signal pointed at a live
+page.
+
+This was measured, not theorised: on a production Hono app behind Cloudflare, with a single IP
+banned, a live page returned `410` with `cf-cache-status: HIT` and `age: 123`.
+
+If you want your CDN to absorb scanner floods at the edge, scope a cache rule to the attack paths
+in your CDN config. That decision belongs where the paths are known, not on a response whose
+meaning depends on who sent it.
+
 ---
 
 ## IP Strike/Ban System
@@ -459,6 +479,10 @@ Have a fresh scanner path slipping through, or a false positive? Open an issue w
 ## Contributing
 
 Issues and PRs welcome at [github.com/ph33nx/hono-honeypot](https://github.com/ph33nx/hono-honeypot)
+
+Maintainers: `docs/maintenance.md` covers the dependency cadence, the supply-chain cooldown, the
+current TypeScript hold and why it exists, and the rule that `bun run build` must pass before any
+release (the dts step fails on things `tsc --noEmit` accepts).
 
 ## License
 

@@ -35,7 +35,7 @@ app.use('*', honeypot())
 |--------|------|---------|-------------|
 | `patterns` | `RegExp[]` | `[]` | Additional patterns to block (merged with built-in) |
 | `exclude` | `RegExp[]` | `[]` | Built-in patterns to remove (match by regex source) |
-| `status` | `410 \| 404 \| 403` | `410` | HTTP status for blocked requests |
+| `status` | `410 \| 404 \| 403` | `410` | HTTP status for blocked requests. Always sent uncacheable, see Gotchas |
 | `store` | `HoneypotStore` | none | Enables IP strike/ban system |
 | `strikeThreshold` | `number` | `3` | Strikes before IP ban |
 | `getIP` | `(c: Context) => string` | proxy headers | Custom IP extraction |
@@ -135,4 +135,6 @@ The key is resolved from `c.env[envKey]` first (Workers/Bun/Deno bindings; `proc
 - IPs resolving to `'unknown'` are not tracked by the strike system (prevents false bans)
 - When `onBlocked` is provided, built-in console logging is suppressed regardless of `log` setting. `onBlocked(info, c)` receives the Hono `Context` — read env bindings via `c.env`, not `process.env` (empty on Workers)
 - 410 Gone is the default status. Google and Bing prioritize 410 for faster deindexing than 404
+- **Every blocked response carries `Cache-Control: no-store` and `CDN-Cache-Control: no-store`, and that is deliberately not configurable.** A block describes the CALLER, but a CDN cache key has no caller component, so a cached block is replayed to everyone. It bites hardest on the ban path, which blocks a banned visitor on paths that DO exist: one banned IP hitting a real page could have the edge store "gone" under that URL. Cloudflare caches 404 and 410 for about 3 minutes by default and 410 is the status search engines act on fastest, so the cached entry is a deindexing signal aimed at a live page. Measured behind Cloudflare as `cf-cache-status: HIT`, `age: 123`. To absorb floods at the edge, put a cache rule on the attack paths in your CDN instead
+- The invisible-character pattern covers U+200B-U+200F, U+2028-U+202E and U+FEFF only, NOT the whole U+2000-U+203F block. The wide form blocked visible punctuation real visitors send (IME-inserted spaces, en and em dashes, curly quotes, ellipsis) and, because a match also earns a strike, could ban them outright. Do not widen it back
 - Without a store, the middleware is stateless (pattern matching only, no strike tracking)

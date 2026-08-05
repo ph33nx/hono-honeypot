@@ -119,6 +119,12 @@ export interface HoneypotOptions {
 	 * - **410 Gone**: Signals permanent removal, bots stop retrying faster, Google/Bing prioritize for index removal
 	 * - **404 Not Found**: Standard response but encourages bot retry logic
 	 * - **403 Forbidden**: May trigger escalation attempts by sophisticated scanners
+	 *
+	 * Whichever you pick, the response ships `Cache-Control: no-store` and `CDN-Cache-Control:
+	 * no-store` and that is not configurable. See {@link BLOCK_HEADERS}: a blocked response is a
+	 * statement about the caller, so letting a CDN store it under a URL key would serve one
+	 * visitor's block to everyone else. That matters most with the default 410, precisely because
+	 * search engines act on it fastest.
 	 */
 	status?: 410 | 404 | 403;
 
@@ -448,13 +454,27 @@ const ATTACK_PATTERNS = [
   /(%00|\x00)/, // Null byte injection (encoded and decoded forms)
 
   // ─── Zero-width / invisible Unicode normalisation probes ─────────────
-  // Scanners send paths like `/%E2%80%8B` (U+200B Zero-Width Space) to
-  // hunt URL-normalisation bugs in routers and CDNs. Hono decodes
-  // `c.req.path`, so these arrive as literal Unicode chars. The range
-  // covers ZWSP, ZWNJ, ZWJ, LRM, RLM, LRO, RLO, all spaces and dashes
-  // in U+2000–U+203F General Punctuation, plus the U+FEFF UTF-8 BOM.
-  // Real users never type these into a URL bar.
-  /[\u2000-\u203F\uFEFF]/u,
+  // Scanners send paths like `/%E2%80%8B` (U+200B Zero-Width Space) to hunt
+  // URL-normalisation bugs in routers and CDNs. Hono decodes `c.req.path`, so
+  // these arrive as literal Unicode chars.
+  //
+  // Matches ONLY the genuinely invisible and directional-control characters,
+  // NOT the whole U+2000-U+203F General Punctuation block. That block also
+  // holds punctuation real people send: U+2000-U+200A spaces (including
+  // U+2006 SIX-PER-EM, which iOS pinyin IMEs insert between syllables), en
+  // and em dashes, curly quotes, and the ellipsis. Narrowed after the wide
+  // class banned a real mobile visitor on a live search path in production,
+  // so this is a measured false positive rather than a theoretical one, and
+  // the strike system makes it self-amplifying: three brushes and that
+  // visitor is locked out of every path. U+202F NARROW NO-BREAK SPACE sits
+  // deliberately outside the range too, since French and Mongolian
+  // typography use it.
+  //
+  //   U+200B-U+200F  ZWSP, ZWNJ, ZWJ, LRM, RLM
+  //   U+2028-U+2029  line and paragraph separators
+  //   U+202A-U+202E  bidi overrides (LRE, RLE, PDF, LRO, RLO)
+  //   U+FEFF         UTF-8 BOM
+  /[\u200B-\u200F\u2028-\u202E\uFEFF]/u,
 
   // ─── Appliance / storage / NAS exploit probes ──────────────────────
   /^\/storfs-asup$/i, // NetApp StorageGRID ASUP endpoint fingerprint
@@ -600,6 +620,35 @@ const ATTACK_PATTERNS = [
   /^\/\.dockerenv$/i,
 ];
 
+// ─── Block Response Headers ─────────────────────────────────────────────
+
+/**
+ * Cache directives sent with every blocked response.
+ *
+ * @remarks
+ * **A block response describes the CLIENT, never the RESOURCE, and a CDN cache key contains no
+ * client component.** So without these headers, one banned visitor requesting one of your real
+ * pages can make the CDN store "this page is gone" under that URL and serve it to every other
+ * visitor hitting the same edge location. Cloudflare caches 404 and 410 for roughly 3 minutes by
+ * default, and the default status here is the one search engines act on fastest, so the cached
+ * entry is a de-index signal aimed at a page that is perfectly alive.
+ *
+ * Measured on a production Hono app behind Cloudflare on 2026-08-05: with a single IP banned, a
+ * live page returned `410` with `cf-cache-status: HIT` and `age: 123`.
+ *
+ * `CDN-Cache-Control` stops the edge and `Cache-Control` stops the browser and any intermediary.
+ * A CDN that reads both prefers the former; one that reads neither is unaffected either way.
+ *
+ * **Deliberately not configurable.** Caching a per-client verdict under a URL-only key is never
+ * correct, so there is no useful value other than `no-store` to offer. If you want your CDN to
+ * absorb scanner floods at the edge, scope that to the attack paths in your CDN rules, where the
+ * decision belongs, rather than to a response whose meaning depends on who sent it.
+ */
+const BLOCK_HEADERS: Record<string, string> = {
+	'Cache-Control': 'no-store',
+	'CDN-Cache-Control': 'no-store',
+};
+
 // ─── Default IP Extraction ──────────────────────────────────────────────
 
 /** Extract client IP from proxy headers (Cloudflare, Nginx, standard proxies) */
@@ -623,6 +672,10 @@ function defaultGetIP(c: Context): string {
  *
  * When a store is provided, enables IP strike tracking: after N pattern matches (default 3),
  * the IP is banned and ALL subsequent requests return 410 instantly without pattern matching.
+ *
+ * Every blocked response is sent uncacheable ({@link BLOCK_HEADERS}). A ban blocks a banned caller
+ * on paths that DO exist, so a cached block would leak one visitor's verdict to everyone behind the
+ * same CDN edge.
  *
  * @param options - Configuration for patterns, store, logging, and status code
  * @returns Hono middleware handler
@@ -677,7 +730,8 @@ export const honeypot = (options: HoneypotOptions = {}) => {
 				} else if (shouldLog) {
 					console.log(`\u{1F6AB} Banned [${ip}] ${c.req.method} ${path}`);
 				}
-				return c.body(null, status);
+				// The ban path is the one that lands on your LIVE urls, so BLOCK_HEADERS matters most here.
+				return c.body(null, status, BLOCK_HEADERS);
 			}
 		}
 
@@ -725,7 +779,7 @@ export const honeypot = (options: HoneypotOptions = {}) => {
 				console.log(`\u{1F36F} Blocked [${ip}] ${c.req.method} ${path}${banMsg}`);
 			}
 
-			return c.body(null, status);
+			return c.body(null, status, BLOCK_HEADERS);
 		}
 
 		return next();
