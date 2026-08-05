@@ -86,5 +86,12 @@ gh run watch
 ```
 
 It installs frozen, runs tests, builds, bumps the version with no tag, publishes to npm with
-provenance, then commits and pushes the tag. Nothing is published without the tests and the build
-passing first.
+provenance, then commits and pushes an ANNOTATED tag. Nothing is published without the tests and the
+build passing first.
+
+**The tag must stay annotated.** `git push --follow-tags` pushes only annotated tags and silently
+drops lightweight ones, so the original `git tag "v$VERSION"` tagged locally, reported success, and
+pushed nothing: every release from v1.0.3 through v1.4.0 reached npm with no tag on the repo, which
+was backfilled on 2026-08-05. The step now names both refs explicitly (`git push origin main
+"v$VERSION"`) and ends with `git ls-remote --exit-code --tags`, so if the tag ever fails to land the
+release fails loudly instead of quietly. Do not simplify either line back.

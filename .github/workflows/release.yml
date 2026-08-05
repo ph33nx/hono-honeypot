@@ -45,6 +45,13 @@ jobs:
           npm install -g npm@latest
           npm publish --access public --provenance
 
+      # The tag MUST be annotated (`git tag -a`). `git push --follow-tags` pushes only
+      # annotated tags and silently drops lightweight ones, so the old `git tag "v$VERSION"`
+      # tagged locally, reported success, and pushed nothing: every release from v1.0.3 to
+      # v1.4.0 shipped to npm with no tag on the repo. Verified against git directly, not
+      # inferred. `git push origin main "v$VERSION"` then names both refs explicitly rather
+      # than relying on that filter at all, so a future change to the tag style cannot
+      # reintroduce a silent no-op.
       - name: Commit, tag, push
         run: |
           git config user.name "github-actions[bot]"
@@ -52,5 +59,6 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           git add package.json
           git commit -m "release: v$VERSION"
-          git tag "v$VERSION"
-          git push --follow-tags
+          git tag -a "v$VERSION" -m "v$VERSION"
+          git push origin main "v$VERSION"
+          git ls-remote --exit-code --tags origin "refs/tags/v$VERSION"
