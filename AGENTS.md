@@ -107,7 +107,7 @@ The key is resolved from `c.env[envKey]` first (Workers/Bun/Deno bindings; `proc
 ## Pattern behavior
 
 - **Smart anchoring:** `^\/pattern$` = exact match, `^\/pattern` = starts with, no anchors = substring match
-- **Path normalization:** Double slashes collapsed before matching (`//admin` becomes `/admin`)
+- **Path normalization:** Double slashes collapsed before matching (`//admin` becomes `/admin`), and again after decoding (`/%2Fadmin` becomes `/admin`)
 - **200+ built-in patterns** covering: PHP, WordPress, shell/backdoors, admin panels, CMS frameworks, version control, sensitive files, SSH/credentials, backups, archives, config files, FTP/SFTP, JS framework fingerprinting, deployment configs, Docker/containers, AWS/cloud credentials, path traversal/LFI, command injection & server-side template injection (`${...}`, `<%...%>`), Vite exploits, Laravel/Django debug, Java/Tomcat/Struts, webmail, database admin tools, SSRF/cloud metadata, IoT/router exploits, Microsoft Exchange/SharePoint, file transfer apps, self-hosted collaboration/monitoring tools, CI/CD/DevOps tools, Kubernetes probes
 - **Encoded probes:** both the raw path and a fully percent-decoded form are matched, so `%24%7B...%7D` (`${...}`) is caught even though Hono leaves reserved chars encoded
 - Custom patterns are merged with built-in patterns
@@ -130,6 +130,7 @@ The key is resolved from `c.env[envKey]` first (Workers/Bun/Deno bindings; `proc
 ## Gotchas
 
 - Patterns match normalized paths (double slashes collapsed to single before matching)
+- Never blocked by default, because a match also earns a strike: `/media`, `/info` (company-page crawlers), a trailing backtick or quote (a URL copied out of code), a bare `${name}` or `${a.b}` placeholder. `${jndi:..}`, `${7*7}` and a quote or backtick with path after it still block
 - `/admin` is blocked by default. Use `exclude` to allow your own admin route
 - MemoryStore is per-isolate (per-process). Use Redis or KV for distributed deployments
 - IPs resolving to `'unknown'` are not tracked by the strike system (prevents false bans)

@@ -126,7 +126,123 @@ describe('honeypot middleware', () => {
 		expect((await app.request('/config/secrets.env')).status).toBe(410);
 		expect((await app.request('/server-status')).status).toBe(410);
 		expect((await app.request('/server-info')).status).toBe(410);
-		expect((await app.request('/info')).status).toBe(410);
+	});
+
+	it('blocks secret and credential file probes', async () => {
+		const app = makeApp();
+		for (const path of [
+			'/key.pem',
+			'/ssl/server.key',
+			'/private-key',
+			'/id_ecdsa',
+			'/.bashrc',
+			'/.pgpass',
+			'/.dev.vars.staging',
+			'/.docker/config.json',
+			'/.claude/settings.local.json',
+			'/.cursor/mcp.json',
+			'/.config/gcloud/credentials.db',
+			'/.cache/huggingface/token',
+			'/service_account.json',
+			'/serviceAccountKey.json',
+			'/firebase-adminsdk.json',
+			'/firebaseConfig.js',
+			'/terraform.tfstate',
+			'/.terraform/terraform.tfstate',
+		]) {
+			expect((await app.request(path)).status, path).toBe(410);
+		}
+	});
+
+	it('blocks dev-server, build-artifact and infra-config probes', async () => {
+		const app = makeApp();
+		for (const path of [
+			'/__vite_rsc_findSourceMapURL',
+			'/.vite/manifest.json',
+			'/dist/.vite/manifest.json',
+			'/pages/index.astro.mjs.map',
+			'/_image',
+			'/compose.yaml',
+			'/docker-compose.prod.yml',
+			'/fly.toml',
+			'/wrangler.toml',
+			'/Dockerrun.aws.json',
+			'/supabase/config.toml',
+			'/values.yaml',
+			'/rclone.conf',
+			'/pnpm-workspace.yaml',
+			'/nx.json',
+			'/litellm/config.yml',
+		]) {
+			expect((await app.request(path)).status, path).toBe(410);
+		}
+	});
+
+	it('blocks CMS, appliance and traversal probes below a prefix', async () => {
+		const app = makeApp();
+		for (const path of [
+			'/blog/wp-json',
+			'/readme.html',
+			'/media/system/js/core.js',
+			'/plugins/editors/jce/jce.xml',
+			'/userfiles',
+			'/api/console/api_server',
+			'/api/proc/self/environ',
+			'/static/..;/..;/proc/self/environ',
+			'/s/1/_/x/..::..::META-INF::maven',
+			'/SiteMap.aspx',
+			'/axis2/services',
+			'/seeyon/htmlofficeservlet',
+			'/WebInterface',
+			'/_profiler/latest',
+			'/v2/_catalog',
+			'/___proxy_subdomain_whm/login',
+			'/php-cgi/php-cgi.exe',
+		]) {
+			expect((await app.request(path)).status, path).toBe(410);
+		}
+	});
+
+	it('an encoded slash cannot hide a root-anchored probe', async () => {
+		const app = makeApp();
+		// `/%2Fadmin` decodes to `//admin`; slashes collapse again after the decode
+		for (const path of ['/%2Fadmin', '/%2F%2Fwp-login.php', '/%2fphpmyadmin']) {
+			expect((await app.request(path)).status, path).toBe(410);
+		}
+		// An encoded slash on a clean path is still clean
+		expect((await app.request('/%2Fblog/post')).status).toBe(200);
+	});
+
+	it('company-page, discovery and markdown paths that share a prefix or a dot pass', async () => {
+		const app = makeApp();
+		for (const path of [
+			'/media', // press-kit and contact crawlers request it beside /about and /team
+			'/info',
+			'/.well-known/security.txt',
+			'/.md',
+			'/media/uploads/photo.webp',
+			'/docs/keys',
+			'/compose',
+		]) {
+			expect((await app.request(path)).status, path).toBe(200);
+		}
+	});
+
+	it('copy artifacts on a pasted link pass, injections with path after them still block', async () => {
+		const app = makeApp();
+		for (const path of [
+			'/docs/api`', // trailing backtick from a markdown code span
+			'/docs/api`.',
+			'/docs/api")', // URL lifted out of `fetch("...")`
+			'/pricing"',
+			'/api/v2${path}', // uninterpolated placeholder from a single-quoted template string
+			'/users/${user.id}',
+		]) {
+			expect((await app.request(path)).status, path).toBe(200);
+		}
+		for (const path of ['/a`whoami`b', '/a"onmouseover=alert(1)', '/${jndi:ldap://x/a}', '/js/${X.url&&y}']) {
+			expect((await app.request(path)).status, path).toBe(410);
+		}
 	});
 
 	it('blocks Swagger/OpenAPI and API docs probes', async () => {

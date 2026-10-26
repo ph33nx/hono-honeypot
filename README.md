@@ -89,35 +89,36 @@ Out of the box, the middleware matches request paths against 200+ regex patterns
 
 | Category | Examples |
 |----------|----------|
-| PHP/WordPress | `*.php`, `/wp-admin`, `/xmlrpc.php`, `/wp-content/` |
+| PHP/WordPress | `*.php`, `/wp-admin`, `/xmlrpc.php`, `/wp-content/`, `/wp-json` under any dir, `/readme.html` |
 | Admin panels | `/admin`, `/phpmyadmin`, `/cpanel`, `/cgi-bin` |
-| CMS frameworks | `/typo3`, `/joomla`, `/drupal`, `/magento` |
+| CMS frameworks | `/typo3`, `/joomla`, `/drupal`, `/magento`, `/media/system/`, `jce.xml` |
 | Magento REST API | `/rest/V1/store/storeConfigs` and store-scope variants |
 | JS framework fingerprinting | `/_next`, `/_rsc`, `/_vercel`, `next.config.js`, `nuxt.config.ts` |
-| Deployment configs | `serverless.yml`, `vercel.json`, `netlify.toml`, `package.json` |
-| Docker/container | `docker-compose.yml`, `Dockerfile`, `/docker/` |
+| Deployment configs | `serverless.yml`, `vercel.json`, `netlify.toml`, `fly.toml`, `wrangler.toml`, `supabase/config.toml`, Helm `values.yaml`, Terraform state and vars |
+| Docker/container | `docker-compose.yml`, `compose.yaml`, `docker-compose.prod.yml`, `Dockerfile`, `/docker/`, `/v2/_catalog` |
 | AWS/cloud credentials | `/aws/*`, `aws_s3`, `aws_ses`, `/.aws/` |
 | Version control | `/.git/`, `/.svn/`, `/.hg/` |
 | Sensitive files | `/.env`, `/.htaccess`, `/.htpasswd`, `*.sql` |
-| SSH/auth tokens | `/.ssh/`, `/id_rsa`, `/.npmrc`, `/.pypirc` |
+| SSH/auth tokens | `/.ssh/`, `/id_rsa`, `/id_ecdsa`, `/.npmrc`, `/.pypirc`, `*.pem`, `*.key`, shell and tool dotfiles (`/.bashrc`, `/.pgpass`, `/.netrc`) |
+| Cloud and agent credentials | service-account `*.json`, `firebaseConfig.js`, `/.docker/`, `/.kube/`, `/.config/gcloud/`, `/.claude/`, `/.cursor/` |
 | System path traversal | `/var/task/`, `/var/log/`, `/opt/` |
-| Command injection | `$(pwd)`, backtick injection, `{curl,…}` brace expansion |
-| Server-side template injection | `${...}` (SpEL / Log4Shell), `<%...%>` (ERB / JSP / ASP) — matched in both raw and percent-decoded form |
+| Command injection | `$(pwd)`, backtick injection, `{curl,…}` brace expansion, `php-cgi` |
+| Server-side template injection | `${jndi:...}`, `${7*7}` (SpEL / Log4Shell), `<%...%>` (ERB / JSP / ASP), matched in both raw and percent-decoded form |
 | URL normalisation probes | Zero-width Unicode (`U+200B`, `U+FEFF` BOM, U+200C–U+200F, U+202A–U+202E directional overrides) |
 | Log files | `*.log`, `error_log` |
-| Java/Spring Boot | `/WEB-INF`, `/manager/html`, `/solr`, `/actuator` |
-| Dependency manifests | `composer.json`, `Gemfile`, `requirements.txt` |
-| WYSIWYG editors | `/ckeditor`, `/tinymce`, `/elfinder` |
+| Java/Spring Boot | `/WEB-INF`, `META-INF`, `*.jsp`, `/axis2`, `/manager/html`, `/solr`, `/actuator` |
+| Dependency manifests | `composer.json`, `Gemfile`, `requirements.txt`, `pnpm-workspace.yaml`, `nx.json`, `turbo.json` |
+| WYSIWYG editors | `/ckeditor`, `/tinymce`, `/elfinder`, `/userfiles` |
 | OS metadata | `.DS_Store`, `Thumbs.db` |
 | Backup files | `*.bak`, `*.old`, `*.backup`, `*.swp` |
-| Path traversal / LFI | `../`, `..%2f`, `/etc/passwd`, `/proc/self/environ` |
-| Vite dev server exploits | `/@fs/`, `/@vite/`, `/@id/` (CVE-2025-30208) |
-| Laravel/Django debug | `/_ignition`, `/__debug__` |
+| Path traversal / LFI | `../`, `..%2f`, `..;/`, `/etc/passwd`, `/proc/self/environ` under any prefix |
+| Vite / Astro dev and build paths | `/@fs/`, `/@vite/`, `/@id/` (CVE-2025-30208), `/__vite*`, `/.vite/manifest.json`, `*.astro.mjs`, `/_image` |
+| Laravel/Django/Symfony debug | `/_ignition`, `/__debug__`, `/_profiler`, `/_debugbar` |
 | SSRF / cloud metadata | `/proxy/`, `169.254.169.254`, `/latest/meta-data` |
 | IoT / router exploits | `/HNAP1/`, `/boaform/`, `/GponForm/`, `/setup.cgi` |
 | Microsoft Exchange/SharePoint | `/owa/`, `/aspnet_client/`, `/ecp/`, `/_layouts/`, `/_vti_bin/` |
 | Self-hosted apps | `/nextcloud/`, `/owncloud/`, `/WebInterface/` (CrushFTP) |
-| Collaboration/monitoring | `/geoserver/`, `/confluence/`, `/jira/`, `/grafana/`, `/kibana/`, `/prometheus/` |
+| Collaboration/monitoring | `/geoserver/`, `/confluence/`, `/jira/`, `/grafana/`, `/kibana/`, `/api/console/`, `/litellm`, `/prometheus/` |
 | CI/CD / DevOps | `/jenkins/`, `/portainer/`, `/gitea/`, `/gitlab/` |
 | Database admin aliases | `/adminer`, `/pma/`, `/myadmin/`, `/mysqladmin`, `/dbadmin` |
 | Webmail | `/roundcube/`, `/webmail/` |
@@ -131,6 +132,16 @@ Patterns use smart anchoring to prevent false positives:
 /api/admin → allowed (nested path, not root)
 /login     → allowed (legitimate app route)
 /blog      → allowed (legitimate app route)
+```
+
+Copy artifacts and common company-page paths never block, because a match also earns a strike:
+
+```
+/docs/api`        → allowed (trailing backtick from a markdown code span)
+/docs/api")       → allowed (URL lifted out of a code sample)
+/users/${user.id} → allowed (uninterpolated developer placeholder)
+/media, /info     → allowed (press-kit and contact crawlers request them)
+/a"onmouseover=…  → blocked (quote with path after it)
 ```
 
 ### Custom Patterns

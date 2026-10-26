@@ -285,14 +285,16 @@ const ATTACK_PATTERNS = [
   /\/wp-includes\//i,
   /\/wp-content\//i,
   /\/wp-admin/i,
+  /\/wp-json/i, // REST API probe under any install dir (`/blog/wp-json`, `/wp/wp-json`)
   /wlwmanifest\.xml$/i,
+  /^\/readme\.html$/i, // WordPress version fingerprint
 
   // ─── Generic upload/file directories (root level) ────────────────────
   /^\/uploads?$/i,
   /^\/images$/i,
   /^\/assets$/i,
   /^\/files$/i,
-  /^\/media$/i,
+  // `/media` and `/info` are deliberately NOT here: press-kit and contact-page crawlers request them beside `/about` and `/team`.
   /^\/public$/i,
 
   // ─── Admin subdirectory exploits (anywhere in path) ──────────────────
@@ -315,11 +317,14 @@ const ATTACK_PATTERNS = [
   /\/images\/stories/i,
   /\/modules\/mod_simplefileupload/i,
   /\/controller\/extension/i,
+  /^\/media\/system\//i, // Joomla core assets
+  /jce\.xml$/i, // Joomla JCE editor fingerprint
 
   // ─── WYSIWYG editor exploits ────────────────────────────────────────
   /\/ckeditor/i,
   /\/tinymce/i,
   /\/elfinder/i,
+  /^\/userfiles/i, // CKFinder / FCKeditor upload dir
 
   // ─── Admin panels (exact matches) ───────────────────────────────────
   /^\/admin(\.php)?$/i,
@@ -362,11 +367,18 @@ const ATTACK_PATTERNS = [
 
   // ─── SSH/credential files ───────────────────────────────────────────
   /\/\.ssh/i,
-  /\/id_rsa/i,
-  /\/id_ed25519/i,
+  /\/id_(rsa|dsa|ecdsa|ed25519)/i,
   /\/\.npmrc$/i,
   /\/\.pypirc$/i,
   /\/\.aws\//i,
+  /\.(pem|key|p12|pfx)$/i, // TLS / private keys (`/server.key`, `/ssl/localhost.key`, `/key.pem`)
+  /^\/private-?key/i,
+  /\/\.(bash_profile|bash_history|bashrc|zshrc|zsh_history|profile)$/i, // Shell dotfiles
+  /\/\.(pgpass|my\.cnf|s3cfg|boto|netrc|vault-token|dockercfg|dev\.vars|amplifyrc|firebaserc)/i, // Tool credential dotfiles
+  // Credential / IDE / agent config dot-dirs. Granular on purpose, never a root `/.` catch-all: `/.well-known/*` is legitimate discovery traffic.
+  /\/\.(docker|cargo|azure|dbeaver|kube|config\/gcloud|cache\/huggingface|claude|cursor|vscode|idea)\//i,
+  /\/(service[_-]?account(key)?|firebase-admin(sdk)?|firebase-service-account|gcp-(credentials|service|key)|google-(credentials|service-account|services)|sa|key)\.json$/i, // Cloud service-account keys
+  /\/firebase(\.json|-?config\.js)$/i,
 
   // ─── Backup files (.bak, .old, .backup, .orig, .save, .swp) ────────
   /\.(bak|old|backup|orig|save|swp)$/i,
@@ -398,7 +410,6 @@ const ATTACK_PATTERNS = [
 
   // ─── Server info/status routes ──────────────────────────────────────
   /^\/server-(status|info)$/i,
-  /^\/info$/i,
 
   // ─── Swagger/OpenAPI probes (NOT /api/openapi.json or nested API docs) ─
   /^\/swagger/i,
@@ -445,10 +456,10 @@ const ATTACK_PATTERNS = [
   // ─── Command injection / SSTI probes ────────────────────────────────
   /^\/getcmd$/i,
   /\$\(/,
-  /\$\{/, // JS template literal / Spring SpEL / Log4Shell-style SSTI (`${...}`). Real paths never contain `${`.
+  /\$\{(?![A-Za-z_]\w*(?:\.\w+)*\})/, // Spring SpEL / Log4Shell-style SSTI (`${jndi:..}`, `${7*7}`). A bare `${name}` or `${a.b}` is an uninterpolated developer placeholder (a template string sent single-quoted), not a probe.
   /<%/, // ERB / JSP / ASP server-side template injection (`<%`, `<%=`, `<%!`). Hono decodes `%3C%25`, so this is reachable.
-  /`/,
-  /"/,
+  /`(?![`.,;:)\]'"]*$)/, // Backtick injection (`/`id``). A backtick followed only by closing punctuation is a markdown code-span copy artifact.
+  /"(?![`.,;:)\]'"]*$)/, // Double quote with path after it (HTML-attribute breakout). A trailing quote is a URL lifted out of a code sample (`fetch("https://x/a")`).
   /\{(curl|wget|bash|sh|nc|ncat|python|perl|ruby|php),/i, // Brace expansion injection ({curl,URL} bypasses WAFs)
   /\.oast\.(site|fun|live|me|online|pro)/i, // OAST callback domains (Interactsh/Burp Collaborator exfiltration)
   /(%00|\x00)/, // Null byte injection (encoded and decoded forms)
@@ -493,15 +504,22 @@ const ATTACK_PATTERNS = [
   /vercel\.json$/i,
   /netlify\.toml$/i,
   /\/helm\//i,
+  /\/(fly|railway|wrangler|samconfig)\.toml$/i,
+  /\/(railway|Dockerrun\.aws)\.json$/i,
+  /\/supabase\/config\.toml$/i,
+  /\/values\.ya?ml$/i, // Helm chart values
+  /\/rclone\.conf$/i,
+  /terraform\.tf(state|vars)|\.auto\.tfvars$|\/\.terraform/i,
 
   // ─── Package manager/dependency files ───────────────────────────────
   /\/package\.json$/i,
   /\/composer\.(json|lock)$/i,
   /\/Gemfile(\.lock)?$/i,
   /\/requirements\.txt$/i,
+  /\/(pnpm-workspace\.ya?ml|turbo\.json|lerna\.json|nx\.json|rush\.json)$/i, // Monorepo manifests
 
   // ─── Docker/container config probes ─────────────────────────────────
-  /docker-compose\.(yml|yaml)$/i,
+  /compose(\.[\w-]+)?\.ya?ml$/i, // `docker-compose.yml`, `compose.yaml`, `docker-compose.prod.yml`
   /Dockerfile$/i,
   /\/docker\//i,
 
@@ -514,8 +532,10 @@ const ATTACK_PATTERNS = [
   /\.\.\//,
   /\.\.%2f/i,
   /\.\.%5c/i,
+  /\.\.;/, // Tomcat / Spring `..;/` path-parameter traversal
   /^\/etc\//i,
   /^\/proc\//i,
+  /\/proc\/self\//i, // the same read below a prefix (`/api/proc/self/environ`)
   /^\/var\//i,
   /^\/opt\//i,
   /\/passwd$/i,
@@ -528,13 +548,22 @@ const ATTACK_PATTERNS = [
   /^\/@fs\//i,
   /^\/@vite\//i,
   /^\/@id\//i,
+  /^\/__vite/i, // Vite dev internals (`/__vite_ping`, `/__vite_rsc_findSourceMapURL`)
+  /\/\.vite\//i, // Vite build manifest (`/.vite/manifest.json`, `/dist/.vite/manifest.json`)
+  /\.astro\.mjs/i, // Astro SSR bundle source maps
+  /^\/_image$/i, // Astro image endpoint (SSRF via `?href=`)
 
   // ─── Laravel/Django debug probes ───────────────────────────────────
   /^\/_ignition/i,
   /^\/__debug__/i,
+  /^\/_(profiler|debugbar)/i, // Symfony profiler, Laravel Debugbar
 
   // ─── Java/Tomcat/Solr/Spring Boot probes ───────────────────────────
   /\/WEB-INF/i,
+  /META-INF/i, // Confluence / Java resource traversal (`..::META-INF::`)
+  /\.(jsp|aspx|ashx)$/i, // Java / ASP.NET server pages. Exclude if your app serves them.
+  /\/axis2/i,
+  /\/(seeyon|zentao|tplus)\//i, // OA / ERP exploit kits
   /^\/manager\/html/i,
   /^\/solr/i,
   /^\/actuator/i,
@@ -590,7 +619,7 @@ const ATTACK_PATTERNS = [
   /^\/_vti_bin\//i,
 
   // ─── File transfer / self-hosted app probes ───────────────────────
-  /^\/WebInterface\//i,
+  /^\/WebInterface(\/|$)/i, // CrushFTP
   /^\/owncloud\//i,
   /^\/nextcloud\//i,
 
@@ -601,6 +630,8 @@ const ATTACK_PATTERNS = [
   /^\/jira\//i,
   /^\/grafana\//i,
   /^\/kibana\//i,
+  /^\/api\/console\//i, // Kibana Dev Tools console proxy (`/api/console/api_server`)
+  /^\/litellm/i, // LiteLLM proxy config (`/litellm/config.yml`)
   /^\/prometheus\//i,
 
   // ─── CI/CD / DevOps tool probes ───────────────────────────────────
@@ -609,6 +640,9 @@ const ATTACK_PATTERNS = [
   /^\/portainer\//i,
   /^\/gitea\//i,
   /^\/gitlab\//i,
+  /^\/v2\/_catalog/i, // Open Docker registry listing
+  /^\/___proxy_subdomain_/i, // cPanel / WHM service proxy
+  /\/php-cgi/i, // PHP-CGI argument injection (CVE-2024-4577)
 
   // ─── Infra / container / Kubernetes probes ────────────────────────
   /^\/metrics$/i,
@@ -744,11 +778,12 @@ export const honeypot = (options: HoneypotOptions = {}) => {
 		// so encoded injection probes (`%24%7B...%7D` → `${...}`) are reachable. Only
 		// re-scan when decoding actually changes the path — the common case (no `%`)
 		// pays nothing. Both forms are tested because some patterns target the encoded
-		// shape (e.g. `..%2f`) and others the decoded shape.
+		// shape (e.g. `..%2f`) and others the decoded shape. Slashes are collapsed again
+		// after decoding: `/%2Fadmin` decodes to `//admin`, which no root-anchored pattern sees.
 		let decodedPath = path;
 		if (path.includes('%')) {
 			try {
-				decodedPath = decodeURIComponent(path);
+				decodedPath = decodeURIComponent(path).replace(/\/+/g, '/');
 			} catch {
 				// Malformed escape sequence — keep the original (itself a probe signal).
 				decodedPath = path;
