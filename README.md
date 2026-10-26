@@ -32,7 +32,7 @@ Reduces attack surface for [**OWASP Top 10 2025 A02 Security Misconfiguration**]
 - **Sample / legacy applications** left on production with default admin accounts (OWASP A02 Scenario #1: WordPress, phpMyAdmin, Adminer, Magento, cPanel)
 - **Debug endpoints** insecure by default (Spring `/actuator`, Django `/__debug__`, Laravel `/_ignition`, Vite `/@fs/`)
 - **Unnecessary features** enabled in production (admin panels, dev-tooling routes, IoT vendor backdoors)
-- **Sensitive files** that should never be web-accessible (`.env`, `.git/`, `.aws/`, `.ssh/`, backup files, dependency manifests)
+- **Sensitive files** that should never be web-accessible (`.env`, `.git/`, `.aws/`, `.ssh/`, private keys, cloud service-account files, Terraform state, backup files, dependency manifests)
 
 This is one layer of defense in depth, not a configuration auditor. Pair with proper hardening, secret management, and removal of unused frameworks.
 

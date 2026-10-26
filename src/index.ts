@@ -259,7 +259,7 @@ export class MemoryStore implements HoneypotStore {
  * - ^pattern = starts with (e.g., ^\/wp- matches /wp-admin, not /api/wp-admin)
  * - pattern = substring match (use carefully to avoid false positives)
  *
- * Paths are normalized (double slashes collapsed) before matching
+ * Paths are normalized (double slashes collapsed, again after decoding) before matching
  */
 const ATTACK_PATTERNS = [
   // ─── PHP vulnerability scanners ───────────────────────────────────────
