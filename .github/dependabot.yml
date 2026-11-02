@@ -9,6 +9,10 @@ updates:
       patch-and-minor:
         update-types: ["minor", "patch"]
     open-pull-requests-limit: 5
+    # TypeScript stays on 5.x until tsup's dts pipeline supports 6+ (docs/maintenance.md, HOLD).
+    ignore:
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     labels: ["dependencies"]
     commit-message:
       prefix: "chore"
