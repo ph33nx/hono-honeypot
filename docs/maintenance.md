@@ -3,7 +3,7 @@
 Periodic upkeep for this package. Run every 4-8 weeks. Drift is cheap to fix monthly and expensive
 to fix yearly, when you are two majors deep with nothing bisectable.
 
-**Last run: 2026-08-05.**
+**Last run: 2026-11-02.**
 
 ## Supply-chain cooldown is sacred
 
