@@ -6,9 +6,9 @@
 
 # hono-honeypot
 
-Security middleware for [Hono.js](https://hono.dev). A mini WAF and honeypot path blocker that intercepts vulnerability scanners (nuclei, nikto, sqlmap, dirbuster, gobuster, wpscan), bot crawlers, and brute-force probes before they reach your route handlers. Optionally bans repeat offenders by IP and reports them to AbuseIPDB.
+Security middleware for [Hono](https://hono.dev): a mini WAF and honeypot that blocks vulnerability scanners (nuclei, nikto, sqlmap, dirbuster, gobuster, wpscan), bad bots, and `wp-admin`, `wp-login.php`, `.env` and `.git` probes before they reach your routes. Optionally bans repeat offenders by IP and reports them to AbuseIPDB. Zero dependencies.
 
-Built from analyzing hundreds of thousands of real-world malicious requests in production. Pattern matching runs in sub-millisecond time across all Hono runtimes: Cloudflare Workers, Bun, Deno, Node.js, Vercel Edge, and Fastly Compute.
+Runs on every Hono runtime: Cloudflare Workers, Bun, Deno, Node.js, Vercel Edge, and Fastly Compute. Matching adds a few microseconds per request (measured on Bun).
 
 ## What this is (and isn't)
 
@@ -64,14 +64,17 @@ Returns Hono middleware. All options are optional.
 
 ```typescript
 app.use('*', honeypot({
-  patterns,          // RegExp[]           — additional patterns to block
-  exclude,           // RegExp[]           — built-in patterns to remove
-  status,            // 410 | 404 | 403    — response status (default: 410)
-  store,             // HoneypotStore      — enables IP strike/ban system
-  strikeThreshold,   // number             — strikes before ban (default: 3)
-  getIP,             // (c: Context) => string — custom IP extraction
-  onBlocked,         // (info: BlockInfo, c: Context) => void — custom block handler
-  log,               // boolean            — console logging (default: true)
+  patterns,          // RegExp[]           : additional patterns to block
+  exclude,           // RegExp[]           : built-in patterns to remove
+  status,            // 410 | 404 | 403    : response status (default: 410)
+  store,             // HoneypotStore      : enables IP strike/ban system
+  strikeThreshold,   // number             : strikes before ban (default: 3)
+  getIP,             // (c: Context) => string : custom IP extraction
+  ipv6Prefix,        // number             : IPv6 bits that identify one client (default: 64)
+  matchQuery,        // boolean            : also match the query string (default: false)
+  isTrusted,         // (c, ip) => boolean | Promise<boolean> : callers that never earn strikes
+  onBlocked,         // (info: BlockInfo, c: Context) => void : custom block handler
+  log,               // boolean            : console logging (default: true)
 }))
 ```
 
@@ -140,6 +143,7 @@ Copy artifacts and common company-page paths never block, because a match also e
 /docs/api`        → allowed (trailing backtick from a markdown code span)
 /docs/api")       → allowed (URL lifted out of a code sample)
 /users/${user.id} → allowed (uninterpolated developer placeholder)
+/SiteMap.aspx     → allowed (sitemap guess by a crawler)
 /media, /info     → allowed (press-kit and contact crawlers request them)
 /a"onmouseover=…  → blocked (quote with path after it)
 ```
@@ -250,7 +254,7 @@ interface HoneypotStore {
   /** Record a strike. Return new total count. */
   addStrike(ip: string): Promise<number> | number
 
-  /** Ban an IP. Called when strikes >= threshold. */
+  /** Ban an IP. Called when strikes reach the threshold. */
   ban(ip: string): Promise<void> | void
 
   /** Clear strikes. Called after ban is set. */
@@ -315,6 +319,34 @@ function createKVStore(kv: KVNamespace): HoneypotStore {
 
 app.use('*', honeypot({ store: createKVStore(env.KV) }))
 ```
+
+---
+
+### IPv6 clients are banned by network
+
+One IPv6 subscriber owns a whole `/64` and can rotate through its addresses for free, so a per-address strike counter never reaches the threshold and a per-address ban blocks nothing. Strikes and bans are keyed on the client's `/64` network (`2001:db8:0:1::/64`) while IPv4 stays on the exact address. Your store receives that key; `onBlocked` still receives the exact address.
+
+```typescript
+app.use('*', honeypot({ store, ipv6Prefix: 56 }))  // wider network
+app.use('*', honeypot({ store, ipv6Prefix: 128 })) // exact address
+```
+
+### Trusting verified crawlers (`isTrusted`)
+
+Search crawlers sometimes request paths that match a pattern (an old `/wp-login.php` link, a `/sitemap.aspx` guess). A trusted caller still gets the block response, but never earns a strike and is not stopped by an existing ban. The callback runs only when a strike or ban would apply, so clean traffic pays nothing.
+
+```typescript
+app.use('*', honeypot({
+  store,
+  isTrusted: (c, ip) => crawlerRanges.contains(ip), // your own check against published IP ranges
+}))
+```
+
+Verify by IP, never by `User-Agent`: a User-Agent is trivial to spoof, and a spoofed crawler would walk past every ban. The package performs no DNS lookups itself, because Workers, Vercel Edge and Fastly Compute expose no reverse-DNS API. Verify against the crawler's published IP ranges (works on every runtime), or with reverse and forward DNS on Node, Bun and Deno.
+
+### Query strings (`matchQuery`)
+
+Probes are sometimes appended to a real URL (`/download?file=/.env`, `?path=../etc/passwd`). Set `matchQuery: true` to match the raw query string against the same patterns. It is off by default because a query can legitimately carry path-like text.
 
 ---
 
@@ -439,7 +471,7 @@ import type { AbuseIPDBOptions } from 'hono-honeypot/abuseipdb'
 
 | Metric | Value |
 |--------|-------|
-| Pattern matching overhead | <1ms per request |
+| Pattern matching overhead | A few microseconds per request (about 3 µs measured on Bun, 6 mixed clean and attack paths) |
 | Ban check (store) | O(1) lookup, runs before pattern matching |
 | Memory footprint | ~10KB (pattern array) |
 | Bundle size | Zero dependencies beyond `hono` peer dep |
@@ -458,23 +490,29 @@ This package ships `AGENTS.md` in the published npm bundle. AI coding agents (Cl
 
 ## FAQ
 
-**How do I block vulnerability scanners in Hono?**
-Add `app.use('*', honeypot())`. It ships 200+ patterns that match the paths nuclei, nikto, sqlmap, dirbuster, gobuster, and wpscan probe for (`/wp-admin`, `/.env`, `/.git/`, `/actuator`, `/@fs/`, …) and returns `410 Gone` before the request reaches your handlers.
+**How do I block vulnerability scanners and bad bots in Hono?**
+Add `app.use('*', honeypot())`. It ships 200+ patterns for the paths nuclei, nikto, sqlmap, dirbuster, gobuster, and wpscan probe (`/wp-admin`, `/wp-login.php`, `/.env`, `/.git/`, `/actuator`, `/@fs/`) and returns `410 Gone` before the request reaches your handlers.
+
+**How do I stop wp-admin, wp-login.php and .env probes on a site that is not WordPress?**
+The default patterns already cover them, in any directory for the WordPress internals and anywhere in the path for `.env` and `.git`. Pass a `store` to ban an IP after three probes so the rest of its sweep is rejected without pattern matching.
 
 **Does it work as a WAF on Cloudflare Workers without a paid plan?**
-Yes. It is a code-level mini WAF that runs in your Worker (and on Bun, Deno, Node.js, Vercel Edge, Fastly Compute) with zero dependencies — no Cloudflare WAF subscription needed. Read env bindings via `c.env`, not `process.env`.
+Yes. It is a code-level mini WAF that runs inside your Worker, and equally on Bun, Deno, Node.js, Vercel Edge, and Fastly Compute, with no Cloudflare WAF subscription. Read bindings from `c.env`, not `process.env`.
 
 **How do I ban repeat attackers by IP?**
-Pass a `store` (`new MemoryStore()` for single-process, or a Redis/KV adapter for distributed). After `strikeThreshold` matches (default 3), the IP is banned and every later request gets an O(1) `410`.
+Pass a `store`: `new MemoryStore()` for a single process, or a Redis or KV adapter for distributed deployments. After `strikeThreshold` matches (default 3) the IP is banned for 24 hours and every later request gets an instant `410`. IPv6 clients are banned by their `/64` network, so rotating addresses does not evade the ban.
+
+**Will it block Googlebot or other search crawlers?**
+Only if a crawler requests a path that matches a pattern. Pass `isTrusted` to exempt callers you verified against the crawler's published IP ranges: they still get the block response but never earn a strike or a ban. Verify by IP, not by User-Agent.
 
 **How do I report attackers to AbuseIPDB from Hono?**
 Import `abuseIPDBReporter` from `hono-honeypot/abuseipdb` and pass it as `onBlocked`. It reports each IP once, when it is banned. See [AbuseIPDB Reporting](#abuseipdb-reporting-optional).
 
 **Will it block my own `/admin` route?**
-The literal path `/admin` is blocked, but `/api/admin`, `/admin/settings`, etc. are not (the pattern is root-anchored). If you serve a real panel at exactly `/admin`, exclude it: `honeypot({ exclude: [/^\/admin(\.php)?$/i] })`.
+The literal path `/admin` is blocked, but `/api/admin`, `/admin/settings`, and similar paths are not, because the pattern is root-anchored. If you serve a real panel at exactly `/admin`, exclude it: `honeypot({ exclude: [/^\/admin(\.php)?$/i] })`.
 
-**Is it a form-field / spam honeypot?**
-No. "Honeypot" here is figurative — it traps path scanners, not form bots. It is not a rate limiter, DDoS protection, or auth layer.
+**Is it a form-field spam honeypot, a rate limiter, or DDoS protection?**
+No. "Honeypot" here means a trap for path scanners, not form bots. It does not rate limit, absorb volumetric attacks, or authenticate users.
 
 ## Roadmap
 

@@ -1,6 +1,6 @@
 # hono-honeypot
 
-Security middleware for Hono.js. A mini WAF and honeypot path blocker that intercepts vulnerability scanners (nuclei, nikto, sqlmap, dirbuster, gobuster, wpscan), bot crawlers, and brute-force probes before they reach route handlers. Works on all Hono runtimes: Cloudflare Workers, Bun, Deno, Node.js, Vercel Edge, Fastly Compute.
+Security middleware for Hono: a mini WAF and honeypot that blocks vulnerability scanners (nuclei, nikto, sqlmap, dirbuster, gobuster, wpscan), bad bots, and `wp-admin`, `wp-login.php`, `.env`, `.git` probes before they reach route handlers. Works on all Hono runtimes: Cloudflare Workers, Bun, Deno, Node.js, Vercel Edge, Fastly Compute.
 
 ## What this is (and isn't)
 
@@ -39,6 +39,9 @@ app.use('*', honeypot())
 | `store` | `HoneypotStore` | none | Enables IP strike/ban system |
 | `strikeThreshold` | `number` | `3` | Strikes before IP ban |
 | `getIP` | `(c: Context) => string` | proxy headers | Custom IP extraction |
+| `ipv6Prefix` | `number` (1-128) | `64` | IPv6 bits that identify one client. The store receives the prefix (`2001:db8:0:1::/64`), IPv4 the exact address, `onBlocked` the exact address. `128` = exact address |
+| `matchQuery` | `boolean` | `false` | Also match the raw query string (`?file=/.env`) against the patterns |
+| `isTrusted` | `(c, ip) => boolean \| Promise<boolean>` | none | Trusted callers get the block response but never a strike, and an existing ban does not stop them. Called only when a strike or ban would apply. Verify by IP, never by User-Agent |
 | `onBlocked` | `(info: BlockInfo, c: Context) => void` | console.log | Custom block handler, receives the Hono `Context` (suppresses built-in logging) |
 | `log` | `boolean` | `true` | Console logging (ignored when onBlocked is set) |
 
@@ -122,6 +125,8 @@ The key is resolved from `c.env[envKey]` first (Workers/Bun/Deno bindings; `proc
 | Custom status code | `honeypot({ status: 404 })` |
 | Allow your own /admin route | `honeypot({ exclude: [/^\/admin(\.php)?$/i] })` |
 | Add custom patterns | `honeypot({ patterns: [/^\/internal/i] })` |
+| Exempt a verified crawler from strikes | `honeypot({ store, isTrusted: (c, ip) => ranges.contains(ip) })` |
+| Match probes in the query string | `honeypot({ matchQuery: true })` |
 | Custom IP extraction | `honeypot({ getIP: (c) => c.req.header('x-real-ip') \|\| 'unknown' })` |
 | Custom block handler | `honeypot({ onBlocked: (info, c) => logger.warn(info) })` |
 | Report bans to AbuseIPDB | `import { abuseIPDBReporter } from 'hono-honeypot/abuseipdb'` then `honeypot({ store, onBlocked: abuseIPDBReporter() })` |
@@ -129,10 +134,12 @@ The key is resolved from `c.env[envKey]` first (Workers/Bun/Deno bindings; `proc
 
 ## Gotchas
 
-- Never blocked by default, because a match also earns a strike: `/media`, `/info` (company-page crawlers), a trailing backtick or quote (a URL copied out of code), a bare `${name}` or `${a.b}` placeholder. `${jndi:..}`, `${7*7}` and a quote or backtick with path after it still block
+- Never blocked by default, because a match also earns a strike: `/media`, `/info` (company-page crawlers), a trailing backtick or quote (a URL copied out of code), a bare `${name}` or `${a.b}` placeholder, a sitemap guess at a server-page extension (`/SiteMap.aspx`). `${jndi:..}`, `${7*7}` and a quote or backtick with path after it still block
 - `/admin` is blocked by default. Use `exclude` to allow your own admin route
 - MemoryStore is per-isolate (per-process). Use Redis or KV for distributed deployments
 - IPs resolving to `'unknown'` are not tracked by the strike system (prevents false bans)
+- The ban is written by the request whose strike count equals `strikeThreshold` exactly, so concurrent requests counting past it neither re-ban nor fire a second `banned` event. A custom store must return the running count from `addStrike`
+- No DNS lookups happen in the package (no portable reverse-DNS API on Workers, Vercel Edge or Fastly Compute). Crawler exemption is the `isTrusted` hook
 - When `onBlocked` is provided, built-in console logging is suppressed regardless of `log` setting. `onBlocked(info, c)` receives the Hono `Context` — read env bindings via `c.env`, not `process.env` (empty on Workers)
 - 410 Gone is the default status. Google and Bing prioritize 410 for faster deindexing than 404
 - **Every blocked response carries `Cache-Control: no-store` and `CDN-Cache-Control: no-store`, and that is deliberately not configurable.** A block describes the CALLER, but a CDN cache key has no caller component, so a cached block is replayed to everyone. It bites hardest on the ban path, which blocks a banned visitor on paths that DO exist: one banned IP hitting a real page could have the edge store "gone" under that URL. Cloudflare caches 404 and 410 for about 3 minutes by default and 410 is the status search engines act on fastest, so the cached entry is a deindexing signal aimed at a live page. Measured behind Cloudflare as `cf-cache-status: HIT`, `age: 123`. To absorb floods at the edge, put a cache rule on the attack paths in your CDN instead

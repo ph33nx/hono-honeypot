@@ -190,7 +190,6 @@ describe('honeypot middleware', () => {
 			'/api/proc/self/environ',
 			'/static/..;/..;/proc/self/environ',
 			'/s/1/_/x/..::..::META-INF::maven',
-			'/SiteMap.aspx',
 			'/axis2/services',
 			'/seeyon/htmlofficeservlet',
 			'/WebInterface',
@@ -1077,5 +1076,181 @@ describe('backwards compatibility', () => {
 	it('respects status option without store', async () => {
 		const app = makeApp({ status: 404 });
 		expect((await app.request('/wp-admin')).status).toBe(404);
+	});
+});
+
+// ─── Sitemap guesses ────────────────────────────────────────────────────
+
+describe('server-page extensions', () => {
+	it('lets a sitemap guess through, still blocks every other server page', async () => {
+		const app = makeApp();
+		for (const path of ['/SiteMap.aspx', '/sitemap.jsp', '/sitemap.ashx']) {
+			expect((await app.request(path)).status, path).toBe(200);
+		}
+		for (const path of ['/login.aspx', '/a/sitemap.aspx.jsp/x.jsp', '/Default.aspx', '/mysitemap.aspx', '/shell.jsp']) {
+			expect((await app.request(path)).status, path).toBe(410);
+		}
+	});
+});
+
+// ─── Client identity (IPv6) ─────────────────────────────────────────────
+
+describe('IPv6 clients', () => {
+	function ipApp(options: Parameters<typeof honeypot>[0] = {}) {
+		const store = new MemoryStore();
+		const app = makeApp({ store, strikeThreshold: 2, ...options });
+		const hit = (path: string, ip: string) => app.request(path, { headers: { 'cf-connecting-ip': ip } });
+		return { app, store, hit };
+	}
+
+	it('bans the whole /64, so rotating the host bits does not evade it', async () => {
+		const { hit } = ipApp();
+		await hit('/wp-admin', '2001:db8:0:1::1');
+		await hit('/.env', '2001:db8:0:1:abcd:ef01:2345:6789');
+		// third address in the same /64 is banned on a clean path
+		expect((await hit('/pricing', '2001:db8:0:1:ffff::9')).status).toBe(410);
+		// a neighbouring /64 is untouched
+		expect((await hit('/pricing', '2001:db8:0:2::1')).status).toBe(200);
+	});
+
+	it('hands the store the /64 prefix and onBlocked the exact address', async () => {
+		const seen: BlockInfo[] = [];
+		const keys: string[] = [];
+		const store = new MemoryStore();
+		const addStrike = store.addStrike.bind(store);
+		store.addStrike = (ip) => (keys.push(ip), addStrike(ip));
+		const app = makeApp({ store, onBlocked: (i) => void seen.push(i) });
+		await app.request('/wp-admin', { headers: { 'cf-connecting-ip': '2001:0DB8::5:1' } });
+		expect(keys).toEqual(['2001:db8::/64']);
+		expect(seen[0]?.ip).toBe('2001:0DB8::5:1');
+	});
+
+	it('keys IPv4 and IPv4-mapped addresses on the exact address', async () => {
+		const keys: string[] = [];
+		const store = new MemoryStore();
+		store.addStrike = (ip) => (keys.push(ip), 1);
+		const app = makeApp({ store });
+		await app.request('/wp-admin', { headers: { 'cf-connecting-ip': '203.0.113.7' } });
+		await app.request('/wp-admin', { headers: { 'cf-connecting-ip': '::ffff:203.0.113.7' } });
+		await app.request('/wp-admin', { headers: { 'cf-connecting-ip': 'not:an:ip' } });
+		expect(keys).toEqual(['203.0.113.7', '::ffff:203.0.113.7', 'not:an:ip']);
+	});
+
+	it('ipv6Prefix 128 keys on the exact address, other prefixes mask to their length', async () => {
+		const keys: string[] = [];
+		const record = (options: Parameters<typeof honeypot>[0]) => {
+			const store = new MemoryStore();
+			store.addStrike = (ip) => (keys.push(ip), 1);
+			return makeApp({ store, ...options });
+		};
+		const headers = { 'cf-connecting-ip': '2001:db8:1234:5678:9abc:def0:1111:2222' };
+		await record({ ipv6Prefix: 128 }).request('/wp-admin', { headers });
+		await record({ ipv6Prefix: 48 }).request('/wp-admin', { headers });
+		await record({ ipv6Prefix: 56 }).request('/wp-admin', { headers });
+		expect(keys).toEqual(['2001:db8:1234:5678:9abc:def0:1111:2222', '2001:db8:1234::/48', '2001:db8:1234:5600::/56']);
+	});
+
+	it('rejects an invalid prefix', () => {
+		for (const ipv6Prefix of [0, 129, 64.5, Number.NaN]) {
+			expect(() => honeypot({ ipv6Prefix }), String(ipv6Prefix)).toThrow(RangeError);
+		}
+	});
+});
+
+// ─── Ban exactly at the threshold ───────────────────────────────────────
+
+describe('ban at the threshold', () => {
+	it('bans and reports once when concurrent requests count past the threshold', async () => {
+		const events: BlockInfo[] = [];
+		const bans: string[] = [];
+		let count = 0;
+		const store = {
+			isBanned: () => false,
+			addStrike: () => ++count,
+			ban: (ip: string) => void bans.push(ip),
+			resetStrikes: () => {},
+		};
+		const app = makeApp({ store, strikeThreshold: 2, getIP: () => '10.0.0.1', onBlocked: (i) => void events.push(i) });
+		await Promise.all(['/wp-admin', '/.env', '/phpmyadmin', '/.git/config'].map((p) => app.request(p)));
+		expect(bans).toEqual(['10.0.0.1']);
+		expect(events.filter((e) => e.banned)).toHaveLength(1);
+		expect(events.map((e) => e.strikes).sort()).toEqual([1, 2, 3, 4]);
+	});
+});
+
+// ─── Query string ───────────────────────────────────────────────────────
+
+describe('matchQuery', () => {
+	it('ignores the query by default', async () => {
+		const app = makeApp();
+		expect((await app.request('/download?file=/.env')).status).toBe(200);
+	});
+
+	it('blocks probes carried in the query when enabled, leaves clean queries alone', async () => {
+		const app = makeApp({ matchQuery: true });
+		for (const url of ['/download?file=/.env', '/view?path=../../etc/passwd', '/p?x=%24%7Bjndi:ldap://a%7D&y=..%2f..%2f']) {
+			expect((await app.request(url)).status, url).toBe(410);
+		}
+		for (const url of ['/search?q=hello+world', '/blog?page=2&tag=hono', '/p?next=/pricing', '/p?name=${user}']) {
+			expect((await app.request(url)).status, url).toBe(200);
+		}
+	});
+
+	it('a query hit earns a strike', async () => {
+		const store = new MemoryStore();
+		const app = makeApp({ store, matchQuery: true, strikeThreshold: 1, getIP: () => '10.0.0.9' });
+		await app.request('/page?file=/.env');
+		expect(store.isBanned('10.0.0.9')).toBe(true);
+	});
+});
+
+// ─── Trusted callers ────────────────────────────────────────────────────
+
+describe('isTrusted', () => {
+	const trustedIP = '66.249.66.1';
+	const build = (options: Parameters<typeof honeypot>[0] = {}) => {
+		const store = new MemoryStore();
+		const calls: string[] = [];
+		const app = makeApp({
+			store,
+			strikeThreshold: 1,
+			isTrusted: async (_c, ip) => (calls.push(ip), ip === trustedIP),
+			...options,
+		});
+		const hit = (path: string, ip: string) => app.request(path, { headers: { 'cf-connecting-ip': ip } });
+		return { store, hit, calls };
+	};
+
+	it('a trusted caller gets the block response but never a strike or a ban', async () => {
+		const { store, hit } = build();
+		for (let i = 0; i < 5; i++) expect((await hit('/wp-login.php', trustedIP)).status).toBe(410);
+		expect(store.isBanned(trustedIP)).toBe(false);
+		expect((await hit('/pricing', trustedIP)).status).toBe(200);
+	});
+
+	it('an untrusted caller is struck and banned as before', async () => {
+		const { store, hit } = build();
+		expect((await hit('/wp-login.php', '203.0.113.9')).status).toBe(410);
+		expect(store.isBanned('203.0.113.9')).toBe(true);
+		expect((await hit('/pricing', '203.0.113.9')).status).toBe(410);
+	});
+
+	it('a trusted caller is not stopped by an existing ban', async () => {
+		const { store, hit } = build();
+		store.ban(trustedIP);
+		expect((await hit('/pricing', trustedIP)).status).toBe(200);
+	});
+
+	it('is never consulted for clean traffic', async () => {
+		const { hit, calls } = build();
+		await hit('/pricing', '203.0.113.9');
+		expect(calls).toEqual([]);
+	});
+
+	it('works with a synchronous callback', async () => {
+		const store = new MemoryStore();
+		const app = makeApp({ store, strikeThreshold: 1, isTrusted: () => true, getIP: () => '10.0.0.3' });
+		await app.request('/wp-admin');
+		expect(store.isBanned('10.0.0.3')).toBe(false);
 	});
 });

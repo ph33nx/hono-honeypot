@@ -162,6 +162,37 @@ export interface HoneypotOptions {
 	getIP?: (c: Context) => string;
 
 	/**
+	 * IPv6 prefix length, in bits, that identifies one client for strikes and bans.
+	 * A single IPv6 subscriber owns a whole /64 and can rotate addresses inside it for free, so a
+	 * per-address ban blocks nothing. IPv4 is always keyed on the exact address.
+	 * Store methods receive the prefix (`2001:db8:0:1::/64`); `BlockInfo.ip` stays the exact address.
+	 * Set 128 to key on the exact address.
+	 * @default 64
+	 */
+	ipv6Prefix?: number;
+
+	/**
+	 * Also match the query string (`?file=/.env`, `?path=../etc/passwd`) against the patterns.
+	 * Off by default because a query can legitimately carry path-like text.
+	 * @default false
+	 */
+	matchQuery?: boolean;
+
+	/**
+	 * Mark a caller as trusted, for example a search crawler verified against its published IP
+	 * ranges or by reverse DNS. A trusted caller still receives the block response on a pattern
+	 * match, but never earns a strike and is not stopped by an existing ban. Only called when a
+	 * strike or ban would apply, so clean traffic pays nothing. Verify by IP, never by User-Agent:
+	 * a User-Agent is trivially spoofed.
+	 *
+	 * @example
+	 * ```ts
+	 * isTrusted: (c, ip) => googlebotRanges.contains(ip)
+	 * ```
+	 */
+	isTrusted?: (c: Context, ip: string) => boolean | Promise<boolean>;
+
+	/**
 	 * Called when a request is blocked (pattern match or ban).
 	 * Use for custom logging, webhooks, metrics, etc.
 	 * When provided, built-in console.log is suppressed.
@@ -561,7 +592,7 @@ const ATTACK_PATTERNS = [
   // ─── Java/Tomcat/Solr/Spring Boot probes ───────────────────────────
   /\/WEB-INF/i,
   /META-INF/i, // Confluence / Java resource traversal (`..::META-INF::`)
-  /\.(jsp|aspx|ashx)$/i, // Java / ASP.NET server pages. Exclude if your app serves them.
+  /(?<!\/sitemap)\.(jsp|aspx|ashx)$/i, // Java / ASP.NET server pages. Exclude if your app serves them. A sitemap guess (`/SiteMap.aspx`) is crawler discovery, not a probe.
   /\/axis2/i,
   /\/(seeyon|zentao|tplus)\//i, // OA / ERP exploit kits
   /^\/manager\/html/i,
@@ -695,6 +726,56 @@ function defaultGetIP(c: Context): string {
 	);
 }
 
+// ─── Client Identity ────────────────────────────────────────────────────
+
+/**
+ * The key strikes and bans are stored under: the exact address for IPv4, the network prefix for
+ * IPv6. Anything that does not parse as plain IPv6 (IPv4, an IPv4-mapped form, a malformed value)
+ * is returned unchanged, so a bad value can never skip a ban.
+ */
+function clientKey(ip: string, prefix: number): string {
+	if (prefix >= 128 || !ip.includes(':')) return ip;
+	const addr = ip.split('%')[0] ?? ip;
+	const halves = addr.split('::');
+	if (addr.includes('.') || halves.length > 2) return ip;
+	const head = halves[0] ? halves[0].split(':') : [];
+	const tail = halves[1] ? halves[1].split(':') : [];
+	const compressed = halves.length === 2;
+	const fill = 8 - head.length - tail.length;
+	if (compressed ? fill < 1 : head.length !== 8) return ip;
+	const groups = [...head, ...Array<string>(compressed ? fill : 0).fill('0'), ...tail].map((g) =>
+		/^[0-9a-f]{1,4}$/i.test(g) ? Number.parseInt(g, 16) : Number.NaN,
+	);
+	if (groups.length !== 8 || groups.some(Number.isNaN)) return ip;
+
+	const masked = groups.map((g, i) => {
+		const keep = Math.max(0, Math.min(16, prefix - i * 16));
+		return (g >> (16 - keep)) << (16 - keep);
+	});
+	// RFC 5952: compress the longest run of zero groups (first on a tie); a single zero group stays written out.
+	let bestStart = -1;
+	let bestLen = 1;
+	for (let i = 0; i < 8; ) {
+		if (masked[i] !== 0) {
+			i++;
+			continue;
+		}
+		let j = i;
+		while (j < 8 && masked[j] === 0) j++;
+		if (j - i > bestLen) {
+			bestStart = i;
+			bestLen = j - i;
+		}
+		i = j;
+	}
+	const hex = masked.map((g) => g.toString(16));
+	const text =
+		bestStart < 0
+			? hex.join(':')
+			: `${hex.slice(0, bestStart).join(':')}::${hex.slice(bestStart + bestLen).join(':')}`;
+	return `${text}/${prefix}`;
+}
+
 // ─── Middleware ──────────────────────────────────────────────────────────
 
 /**
@@ -750,14 +831,21 @@ export const honeypot = (options: HoneypotOptions = {}) => {
 	const strikeThreshold = options.strikeThreshold ?? 3;
 	const getIP = options.getIP ?? defaultGetIP;
 	const onBlocked = options.onBlocked;
+	const matchQuery = options.matchQuery ?? false;
+	const ipv6Prefix = options.ipv6Prefix ?? 64;
+	if (!Number.isInteger(ipv6Prefix) || ipv6Prefix < 1 || ipv6Prefix > 128) {
+		throw new RangeError('honeypot: ipv6Prefix must be an integer from 1 to 128');
+	}
+	const isTrusted = async (c: Context, ip: string) => (await options.isTrusted?.(c, ip)) === true;
 
 	return createMiddleware(async (c, next) => {
 		const ip = getIP(c);
 		const validIP = ip && ip !== 'unknown';
+		const key = validIP ? clientKey(ip, ipv6Prefix) : ip;
 
-		// Fast path: check if IP is already banned (skips pattern matching entirely)
+		// Fast path: check if the client is already banned (skips pattern matching entirely)
 		if (store && validIP) {
-			if (await store.isBanned(ip)) {
+			if ((await store.isBanned(key)) && !(await isTrusted(c, ip))) {
 				const path = c.req.path.replace(/\/+/g, '/');
 				if (onBlocked) {
 					onBlocked({ ip, path, method: c.req.method, reason: 'banned' }, c);
@@ -790,19 +878,24 @@ export const honeypot = (options: HoneypotOptions = {}) => {
 			}
 		}
 
+		const queryStart = matchQuery ? c.req.url.indexOf('?') : -1;
+		const query = queryStart >= 0 ? c.req.url.slice(queryStart) : '';
+
 		if (
 			patterns.some((pattern) => pattern.test(path)) ||
-			(decodedPath !== path && patterns.some((pattern) => pattern.test(decodedPath)))
+			(decodedPath !== path && patterns.some((pattern) => pattern.test(decodedPath))) ||
+			(query !== '' && patterns.some((pattern) => pattern.test(query)))
 		) {
 			let strikes: number | undefined;
 			let banned = false;
 
-			// Track strikes and ban if threshold reached
-			if (store && validIP) {
-				strikes = await store.addStrike(ip);
-				if (strikes >= strikeThreshold) {
-					await store.ban(ip);
-					await store.resetStrikes(ip);
+			// Track strikes; only the request that lands exactly on the threshold writes the ban, so
+			// concurrent siblings that count past it neither re-ban nor fire a second `banned` event.
+			if (store && validIP && !(await isTrusted(c, ip))) {
+				strikes = await store.addStrike(key);
+				if (strikes === strikeThreshold) {
+					await store.ban(key);
+					await store.resetStrikes(key);
 					banned = true;
 				}
 			}
