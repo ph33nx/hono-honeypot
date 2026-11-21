@@ -1,6 +1,6 @@
 {
 	"name": "hono-honeypot",
-	"version": "1.6.0",
+	"version": "1.7.0",
 	"description": "Hono security middleware: honeypot and mini WAF that blocks vulnerability scanners (nuclei, nikto, sqlmap, wpscan), bad bots, and wp-admin, wp-login.php, .env and .git probes. Optional IP ban (IPv6 by /64) plus AbuseIPDB reporting. Zero dependencies. Cloudflare Workers, Bun, Deno, Node.js, Vercel Edge, Fastly Compute.",
 	"type": "module",
 	"main": "./dist/index.cjs",
